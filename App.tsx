@@ -27,7 +27,10 @@ import {
   Cloud,
   Settings,
   Moon,
-  Sun
+  Sun,
+  Pencil,
+  Download,
+  Upload
 } from 'lucide-react';
 import { 
   PieChart, 
@@ -84,11 +87,23 @@ const saveUserData = (username, key, value) => {
   }
 };
 
+// Lee y parsea JSON de localStorage sin romper la app si el dato es inválido o ajeno
+const leerJSON = (clave, porDefecto) => {
+  try {
+    const raw = localStorage.getItem(clave);
+    return raw ? JSON.parse(raw) : porDefecto;
+  } catch (e) {
+    return porDefecto;
+  }
+};
+
 export default function App() {
   // --- ESTADO DE AUTENTICACIÓN ---
   const [user, setUser] = useState(() => {
-    const activeUser = localStorage.getItem('finanzas_active_user');
-    return activeUser ? JSON.parse(activeUser) : null;
+    const activeUser = leerJSON('finanzas_active_user', null);
+    return activeUser && typeof activeUser === 'object' && typeof activeUser.username === 'string'
+      ? activeUser
+      : null;
   });
 
   // --- CONFIGURACIÓN & MODO NOCHE ---
@@ -226,6 +241,8 @@ export default function App() {
   const [actualMetaForm, setActualMetaForm] = useState('');
   const [fechaLimiteMetaForm, setFechaLimiteMetaForm] = useState('');
   const [mostrarModalInfoData, setMostrarModalInfoData] = useState(false);
+  const [transaccionEditandoId, setTransaccionEditandoId] = useState(null);
+  const [mensajeRespaldo, setMensajeRespaldo] = useState(null);
   const [mostrarModalConfig, setMostrarModalConfig] = useState(false);
 
   // Conversor de divisas
@@ -275,7 +292,8 @@ export default function App() {
       return;
     }
 
-    const usersDb = JSON.parse(localStorage.getItem('finanzas_users_registry') || '{}');
+    const registro = leerJSON('finanzas_users_registry', {});
+    const usersDb = registro && typeof registro === 'object' && !Array.isArray(registro) ? registro : {};
 
     if (modoAuth === 'register') {
       if (usersDb[cleanUsername]) {
@@ -284,7 +302,13 @@ export default function App() {
         return;
       }
       usersDb[cleanUsername] = { password: passwordForm };
-      localStorage.setItem('finanzas_users_registry', JSON.stringify(usersDb));
+      try {
+        localStorage.setItem('finanzas_users_registry', JSON.stringify(usersDb));
+      } catch (err) {
+        setErrorAuth('No se pudo guardar la cuenta: tu navegador bloquea el almacenamiento local (¿modo privado o cookies bloqueadas?).');
+        setProcesandoAuth(false);
+        return;
+      }
     } else {
       if (!usersDb[cleanUsername] || usersDb[cleanUsername].password !== passwordForm) {
         setErrorAuth('Usuario o contraseña incorrectos.');
@@ -298,7 +322,11 @@ export default function App() {
       uid: `user_${cleanUsername}`
     };
 
-    localStorage.setItem('finanzas_active_user', JSON.stringify(newUser));
+    try {
+      localStorage.setItem('finanzas_active_user', JSON.stringify(newUser));
+    } catch (err) {
+      // Sin almacenamiento: la sesión vale solo mientras la pestaña esté abierta
+    }
     setUser(newUser);
     setUsernameForm('');
     setPasswordForm('');
@@ -306,7 +334,11 @@ export default function App() {
   };
 
   const handleCerrarSesion = () => {
-    localStorage.removeItem('finanzas_active_user');
+    try {
+      localStorage.removeItem('finanzas_active_user');
+    } catch (err) {}
+    setModoAuth('login');
+    setErrorAuth('');
     setUser(null);
   };
 
@@ -423,6 +455,48 @@ export default function App() {
     if (tipoForm === 'gasto' && esCreditoForm) {
       const tarjetaObj = tarjetas.find(t => t.id === tarjetaSeleccionadaId);
       nombreMetodo = tarjetaObj ? `Tarjeta: ${tarjetaObj.nombre}` : 'Tarjeta de Crédito';
+    }
+
+    // --- Modo edición: reemplaza la transacción y ajusta la deuda de la tarjeta ---
+    if (transaccionEditandoId) {
+      const vieja = transacciones.find(t => t.id === transaccionEditandoId);
+      if (vieja) {
+        const esCreditoNueva = tipoForm === 'gasto' && esCreditoForm;
+        const editada = {
+          ...vieja,
+          tipo: tipoForm,
+          monto: montoNum,
+          moneda: monedaTransForm,
+          categoria: categoriaForm,
+          esCredito: esCreditoNueva,
+          tarjetaId: esCreditoNueva ? tarjetaSeleccionadaId : null,
+          metodo: nombreMetodo,
+          fecha: fechaForm,
+          descripcion: descForm || (tipoForm === 'gasto' ? 'Gasto registrado' : 'Ingreso registrado'),
+          editadoEn: new Date().toISOString()
+        };
+        setTransacciones(prev => prev.map(t => (t.id === vieja.id ? editada : t)));
+
+        const afectabaTarjeta = vieja.tipo === 'gasto' && vieja.esCredito && vieja.tarjetaId;
+        const afectaTarjeta = editada.tipo === 'gasto' && editada.esCredito && editada.tarjetaId;
+        if (afectabaTarjeta || afectaTarjeta) {
+          setTarjetas(prev => prev.map(tar => {
+            let deuda = tar.deudaActual || 0;
+            if (afectabaTarjeta && tar.id === vieja.tarjetaId) {
+              deuda = Math.max(0, deuda - convertirMoneda(Number(vieja.monto), vieja.moneda || 'PEN', tar.moneda || 'PEN'));
+            }
+            if (afectaTarjeta && tar.id === editada.tarjetaId) {
+              deuda += convertirMoneda(editada.monto, editada.moneda, tar.moneda || 'PEN');
+            }
+            return deuda === (tar.deudaActual || 0) ? tar : { ...tar, deudaActual: deuda };
+          }));
+        }
+      }
+      setTransaccionEditandoId(null);
+      setMontoForm('');
+      setDescForm('');
+      setMostrarModalTransaccion(false);
+      return;
     }
 
     const nuevaTrans = {
@@ -560,6 +634,126 @@ export default function App() {
 
   const eliminarPrestamo = (id) => {
     setPrestamos(prev => prev.filter(p => p.id !== id));
+  };
+
+  const abrirNuevaTransaccion = () => {
+    if (transaccionEditandoId) {
+      // Venimos de una edición cancelada: formulario limpio
+      setTransaccionEditandoId(null);
+      setTipoForm('gasto');
+      setCategoriaForm(CATEGORIAS_GASTOS[0]);
+      setEsCreditoForm(false);
+      setMonedaTransForm('PEN');
+      setMontoForm('');
+      setDescForm('');
+      setFechaForm(new Date().toISOString().split('T')[0]);
+    }
+    setMostrarModalTransaccion(true);
+  };
+
+  const abrirEdicionTransaccion = (t) => {
+    setTransaccionEditandoId(t.id);
+    setTipoForm(t.tipo);
+    setMontoForm(String(t.monto));
+    setMonedaTransForm(t.moneda || 'PEN');
+    setDescForm(t.descripcion || '');
+    setCategoriaForm(t.categoria);
+    setFechaForm(t.fecha);
+    setEsCreditoForm(!!t.esCredito);
+    if (t.esCredito && t.tarjetaId) setTarjetaSeleccionadaId(t.tarjetaId);
+    if (!t.esCredito && METODOS_PAGO_LIQUIDOS.includes(t.metodo)) setMetodoLiquidoForm(t.metodo);
+    setMostrarModalTransaccion(true);
+  };
+
+  const descargarArchivo = (contenido, nombre, tipoMime) => {
+    const blob = new Blob([contenido], { type: tipoMime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = nombre;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const exportarRespaldo = () => {
+    const respaldo = {
+      app: 'gestor-finanzas',
+      version: 1,
+      exportadoEn: new Date().toISOString(),
+      moneda,
+      tiposCambio,
+      darkMode,
+      transacciones,
+      tarjetas,
+      prestamos,
+      metas
+    };
+    const hoy = new Date().toISOString().split('T')[0];
+    descargarArchivo(JSON.stringify(respaldo, null, 2), `finanzas-respaldo-${hoy}.json`, 'application/json');
+    setMensajeRespaldo({ tipo: 'ok', texto: 'Copia de respaldo descargada.' });
+  };
+
+  const exportarCSV = () => {
+    // Comillas dobles escapadas; se neutralizan celdas que empiecen como fórmula de Excel
+    const esc = (v) => {
+      let txt = String(v ?? '');
+      if (/^[=+\-@\t\r]/.test(txt)) txt = "'" + txt;
+      return '"' + txt.replace(/"/g, '""') + '"';
+    };
+    const filas = [['Fecha', 'Tipo', 'Categoría', 'Concepto', 'Método', 'Moneda', 'Monto']];
+    [...transacciones]
+      .sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)))
+      .forEach(t => {
+        filas.push([t.fecha, t.tipo, t.categoria, t.descripcion, t.metodo, t.moneda || 'PEN', Number(t.monto || 0).toFixed(2)]);
+      });
+    const csv = '\uFEFF' + filas.map(f => f.map(esc).join(',')).join('\r\n');
+    const hoy = new Date().toISOString().split('T')[0];
+    descargarArchivo(csv, `finanzas-movimientos-${hoy}.csv`, 'text/csv;charset=utf-8');
+    setMensajeRespaldo({ tipo: 'ok', texto: `Se exportaron ${transacciones.length} movimientos.` });
+  };
+
+  const importarRespaldo = (e) => {
+    const archivo = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!archivo) return;
+
+    const lector = new FileReader();
+    lector.onload = () => {
+      try {
+        const datos = JSON.parse(String(lector.result));
+        if (!datos || datos.app !== 'gestor-finanzas' || !Array.isArray(datos.transacciones)) {
+          throw new Error('formato');
+        }
+        const lista = (v) => (Array.isArray(v) ? v.filter(x => x && typeof x === 'object' && x.id != null) : []);
+        const nuevasTrans = lista(datos.transacciones);
+        const confirmar = window.confirm(
+          `Se reemplazarán tus datos actuales por la copia de respaldo (${nuevasTrans.length} transacciones). ¿Continuar?`
+        );
+        if (!confirmar) return;
+
+        setTransacciones(nuevasTrans);
+        setTarjetas(lista(datos.tarjetas));
+        setPrestamos(lista(datos.prestamos));
+        setMetas(lista(datos.metas));
+        if (['PEN', 'USD', 'EUR'].includes(datos.moneda)) setMoneda(datos.moneda);
+        if (datos.tiposCambio && Number(datos.tiposCambio.USD_PEN) > 0 && Number(datos.tiposCambio.EUR_PEN) > 0) {
+          setTiposCambio({
+            USD_PEN: Number(datos.tiposCambio.USD_PEN),
+            EUR_PEN: Number(datos.tiposCambio.EUR_PEN)
+          });
+        }
+        if (typeof datos.darkMode === 'boolean') setDarkMode(datos.darkMode);
+        setMensajeRespaldo({ tipo: 'ok', texto: 'Copia restaurada correctamente.' });
+      } catch (err) {
+        setMensajeRespaldo({
+          tipo: 'error',
+          texto: 'No se pudo leer el archivo. Usa una copia descargada desde esta app (.json).'
+        });
+      }
+    };
+    lector.readAsText(archivo);
   };
 
   const eliminarTransaccion = (t) => {
@@ -738,7 +932,7 @@ export default function App() {
               <Settings className="w-3.5 h-3.5 text-indigo-400" /> Configuración
             </button>
             <button
-              onClick={() => setMostrarModalInfoData(true)}
+              onClick={() => { setMensajeRespaldo(null); setMostrarModalInfoData(true); }}
               className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 rounded-xl font-medium text-slate-200 transition-colors"
             >
               <Database className="w-3.5 h-3.5 text-indigo-400" /> Datos
@@ -788,7 +982,7 @@ export default function App() {
 
           <div className="flex flex-wrap gap-2 w-full md:w-auto">
             <button
-              onClick={() => setMostrarModalTransaccion(true)}
+              onClick={abrirNuevaTransaccion}
               className="flex-1 md:flex-initial flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-xl font-semibold shadow-sm transition-all text-sm"
             >
               <Plus className="w-4 h-4" /> Transacción
@@ -1194,7 +1388,16 @@ export default function App() {
                       <td className={`py-3 px-4 text-right font-bold whitespace-nowrap ${t.tipo === 'ingreso' ? 'text-emerald-500' : t.tipo === 'gasto' ? 'text-rose-500' : 'text-purple-500'}`}>
                         {t.tipo === 'ingreso' ? '+' : '-'} {formatoMoneda(t.monto, t.moneda || 'PEN')}
                       </td>
-                      <td className="py-3 px-4 text-center">
+                      <td className="py-3 px-4 text-center whitespace-nowrap">
+                        {(t.tipo === 'ingreso' || t.tipo === 'gasto') && t.categoria !== 'Pago de Préstamo' && (
+                          <button
+                            onClick={() => abrirEdicionTransaccion(t)}
+                            className="p-1.5 text-slate-400 hover:text-indigo-500 transition-colors rounded-lg hover:bg-indigo-500/10"
+                            title="Editar transacción"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                        )}
                         <button
                           onClick={() => eliminarTransaccion(t)}
                           className="p-1.5 text-slate-400 hover:text-rose-500 transition-colors rounded-lg hover:bg-rose-500/10"
@@ -1318,21 +1521,21 @@ export default function App() {
           <div className={`rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4 ${darkMode ? 'bg-slate-900 border border-slate-800 text-white' : 'bg-white text-slate-800'}`}>
             <h3 className={`text-xl font-bold flex items-center gap-2 ${darkMode ? 'text-white' : 'text-slate-800'}`}>
               <Wallet className="w-5 h-5 text-indigo-600" />
-              Nueva Transacción Multi-Moneda
+              {transaccionEditandoId ? 'Editar Transacción' : 'Nueva Transacción Multi-Moneda'}
             </h3>
             
             <form onSubmit={agregarTransaccion} className="space-y-4">
               <div className={`flex p-1 rounded-xl ${darkMode ? 'bg-slate-800' : 'bg-slate-100'}`}>
                 <button
                   type="button"
-                  onClick={() => setTipoForm('gasto')}
+                  onClick={() => { if (tipoForm !== 'gasto') { setTipoForm('gasto'); setCategoriaForm(CATEGORIAS_GASTOS[0]); } }}
                   className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all ${tipoForm === 'gasto' ? (darkMode ? 'bg-slate-700 text-rose-400 shadow' : 'bg-white shadow text-rose-600') : 'text-slate-400'}`}
                 >
                   Gasto
                 </button>
                 <button
                   type="button"
-                  onClick={() => setTipoForm('ingreso')}
+                  onClick={() => { if (tipoForm !== 'ingreso') { setTipoForm('ingreso'); setCategoriaForm(CATEGORIAS_INGRESOS[0]); } }}
                   className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all ${tipoForm === 'ingreso' ? (darkMode ? 'bg-slate-700 text-emerald-400 shadow' : 'bg-white shadow text-emerald-600') : 'text-slate-400'}`}
                 >
                   Ingreso
@@ -1477,7 +1680,7 @@ export default function App() {
                   disabled={tipoForm === 'gasto' && esCreditoForm && tarjetas.length === 0}
                   className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl font-semibold text-sm shadow-sm"
                 >
-                  Guardar
+                  {transaccionEditandoId ? 'Guardar cambios' : 'Guardar'}
                 </button>
               </div>
             </form>
@@ -1839,7 +2042,7 @@ export default function App() {
       {/* MODAL INFORMACIÓN DE DATOS */}
       {mostrarModalInfoData && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className={`rounded-2xl shadow-xl w-full max-w-lg p-6 space-y-5 ${darkMode ? 'bg-slate-900 border border-slate-800 text-white' : 'bg-white text-slate-800'}`}>
+          <div className={`rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6 space-y-5 ${darkMode ? 'bg-slate-900 border border-slate-800 text-white' : 'bg-white text-slate-800'}`}>
             <div className={`flex items-center justify-between border-b pb-3 ${darkMode ? 'border-slate-800' : 'border-slate-100'}`}>
               <h3 className={`text-xl font-bold flex items-center gap-2 ${darkMode ? 'text-white' : 'text-slate-800'}`}>
                 <Database className="w-6 h-6 text-indigo-600" />
@@ -1868,6 +2071,42 @@ export default function App() {
                 <div className="text-slate-400 font-semibold uppercase">Credenciales del usuario</div>
                 <div className={darkMode ? 'text-slate-200' : 'text-slate-700'}><strong>Nombre de usuario:</strong> {user.username}</div>
                 <div className={`truncate ${darkMode ? 'text-slate-200' : 'text-slate-700'}`}><strong>ID Cuenta:</strong> {user.uid}</div>
+              </div>
+
+              <div className={`p-3 border rounded-xl space-y-3 ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                <div>
+                  <h4 className={`font-bold text-sm ${darkMode ? 'text-slate-100' : 'text-slate-800'}`}>Copia de respaldo</h4>
+                  <p className="text-xs mt-0.5">
+                    Tus datos viven solo en este navegador. Descarga una copia para no perderlos si borras los datos del navegador o cambias de equipo.
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={exportarRespaldo}
+                    className="flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white"
+                  >
+                    <Download className="w-4 h-4" /> Descargar respaldo
+                  </button>
+                  <label
+                    className={`flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-semibold cursor-pointer border transition-colors ${darkMode ? 'border-slate-600 text-slate-200 hover:bg-slate-700' : 'border-slate-300 text-slate-700 hover:bg-slate-100'}`}
+                  >
+                    <Upload className="w-4 h-4" /> Restaurar respaldo
+                    <input type="file" accept=".json,application/json" onChange={importarRespaldo} className="hidden" />
+                  </label>
+                </div>
+                <button
+                  type="button"
+                  onClick={exportarCSV}
+                  className={`w-full flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-semibold border transition-colors ${darkMode ? 'border-slate-600 text-slate-200 hover:bg-slate-700' : 'border-slate-300 text-slate-700 hover:bg-slate-100'}`}
+                >
+                  <Download className="w-4 h-4" /> Exportar movimientos a CSV (Excel)
+                </button>
+                {mensajeRespaldo && (
+                  <p role="status" className={`text-xs font-medium ${mensajeRespaldo.tipo === 'ok' ? 'text-emerald-500' : 'text-rose-500'}`}>
+                    {mensajeRespaldo.texto}
+                  </p>
+                )}
               </div>
             </div>
 
