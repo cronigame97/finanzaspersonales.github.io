@@ -73,8 +73,12 @@ const CATEGORIAS_INGRESOS = [
   'Sueldo / Salario', 'Ventas', 'Freelance', 'Inversiones', 'Regalo', 'Otros Ingresos'
 ];
 
-const METODOS_PAGO_LIQUIDOS_DEFECTO = [
-  'Yape', 'Plin', 'BCP Débito', 'BBVA Débito', 'Interbank Débito', 'Scotiabank Débito', 'Efectivo'
+const CUENTAS_DEFECTO = [
+  { id: 'c1', nombre: 'BCP Débito', tipo: 'Bancaria', moneda: 'PEN', saldoInicial: 0, color: '#3B82F6' },
+  { id: 'c2', nombre: 'BBVA Débito', tipo: 'Bancaria', moneda: 'PEN', saldoInicial: 0, color: '#10B981' },
+  { id: 'c3', nombre: 'Yape', tipo: 'Billetera Digital', moneda: 'PEN', saldoInicial: 0, color: '#8B5CF6' },
+  { id: 'c4', nombre: 'Plin', tipo: 'Billetera Digital', moneda: 'PEN', saldoInicial: 0, color: '#06B6D4' },
+  { id: 'c5', nombre: 'Efectivo', tipo: 'Efectivo', moneda: 'PEN', saldoInicial: 0, color: '#F59E0B' }
 ];
 
 const COLORES_CATEGORIAS = [
@@ -137,26 +141,146 @@ export default function App() {
   const [modoAuth, setModoAuth] = useState('login');
   const [usernameForm, setUsernameForm] = useState('');
   const [passwordForm, setPasswordForm] = useState('');
+  const [preguntaForm, setPreguntaForm] = useState('¿Cuál es el nombre de tu primera mascota?');
+  const [respuestaForm, setRespuestaForm] = useState('');
   const [errorAuth, setErrorAuth] = useState('');
   const [procesandoAuth, setProcesandoAuth] = useState(false);
 
-  // --- NAVEGACIÓN Y FILTROS ---
-  const [seccionActiva, setSeccionActiva] = useState('general'); // 'general' | 'cuentas' | 'tarjetas' | 'prestamos'
+  // Modal Recuperar Contraseña
+  const [mostrarModalRecuperar, setMostrarModalRecuperar] = useState(false);
+  const [userRecuperar, setUserRecuperar] = useState('');
+  const [respuestaRecuperar, setRespuestaRecuperar] = useState('');
+  const [nuevaPasswordForm, setNuevaPasswordForm] = useState('');
+  const [preguntaUsuario, setPreguntaUsuario] = useState('');
+  const [pasoRecuperacion, setPasoRecuperacion] = useState(1);
+  const [mensajeRecuperacion, setMensajeRecuperacion] = useState(null);
+
+  // Modal Borrar Caché / Datos
+  const [mostrarModalBorrarCache, setMostrarModalBorrarCache] = useState(false);
+  const [confirmarTextoBorrar, setConfirmarTextoBorrar] = useState('');
+
+  // Navegación y Secciones
+  const [seccionActiva, setSeccionActiva] = useState('general');
   const [mesSeleccionado, setMesSeleccionado] = useState(new Date().getMonth());
   const [anioSeleccionado, setAnioSeleccionado] = useState(new Date().getFullYear());
+
+  // Datos principales por usuario
+  const [transacciones, setTransacciones] = useState([]);
+  const [cuentasBancarias, setCuentasBancarias] = useState([]);
+  const [tarjetas, setTarjetas] = useState([]);
+  const [prestamos, setPrestamos] = useState([]);
+  const [presupuestos, setPresupuestos] = useState({});
+  const [recurrentes, setRecurrentes] = useState([]);
+  const [metas, setMetas] = useState([]);
+
+  // Cargar datos al iniciar sesión o cambiar usuario
+  useEffect(() => {
+    if (!user) return;
+    setTransacciones(loadUserData(user.username, 'transacciones', []));
+    setCuentasBancarias(loadUserData(user.username, 'cuentas_bancarias', CUENTAS_DEFECTO));
+    setTarjetas(loadUserData(user.username, 'tarjetas', []));
+    setPrestamos(loadUserData(user.username, 'prestamos', []));
+    setPresupuestos(loadUserData(user.username, 'presupuestos', {}));
+    setRecurrentes(loadUserData(user.username, 'recurrentes', []));
+    setMetas(loadUserData(user.username, 'metas', []));
+  }, [user]);
+
+  // Guardar datos ante cambios
+  useEffect(() => {
+    if (!user) return;
+    saveUserData(user.username, 'dark_mode', darkMode);
+    saveUserData(user.username, 'moneda', moneda);
+    saveUserData(user.username, 'tipos_cambio', tiposCambio);
+    saveUserData(user.username, 'transacciones', transacciones);
+    saveUserData(user.username, 'cuentas_bancarias', cuentasBancarias);
+    saveUserData(user.username, 'tarjetas', tarjetas);
+    saveUserData(user.username, 'prestamos', prestamos);
+    saveUserData(user.username, 'presupuestos', presupuestos);
+    saveUserData(user.username, 'recurrentes', recurrentes);
+    saveUserData(user.username, 'metas', metas);
+  }, [darkMode, moneda, tiposCambio, transacciones, cuentasBancarias, tarjetas, prestamos, presupuestos, recurrentes, metas, user]);
+
+  // Modales y Formularios UI
   const [busqueda, setBusqueda] = useState('');
   const [filtroTipo, setFiltroTipo] = useState('todos');
   const [filtroCategoria, setFiltroCategoria] = useState('todas');
   const [filtroMetodo, setFiltroMetodo] = useState('todos');
 
-  // --- DATOS DEL USUARIO ---
-  const [transacciones, setTransacciones] = useState([]);
-  const [cuentasBancarias, setCuentasBancarias] = useState([]);
-  const [tarjetas, setTarjetas] = useState([]);
-  const [prestamos, setPrestamos] = useState([]);
-  const [metas, setMetas] = useState([]);
-  const [presupuestos, setPresupuestos] = useState({});
-  const [recurrentes, setRecurrentes] = useState([]);
+  const [mostrarModalTransaccion, setMostrarModalTransaccion] = useState(false);
+  const [transaccionEditandoId, setTransaccionEditandoId] = useState(null);
+  const [tipoForm, setTipoForm] = useState('gasto');
+  const [montoForm, setMontoForm] = useState('');
+  const [descForm, setDescForm] = useState('');
+  const [categoriaForm, setCategoriaForm] = useState(CATEGORIAS_GASTOS[0]);
+  const [fechaForm, setFechaForm] = useState(new Date().toISOString().split('T')[0]);
+  const [monedaTransForm, setMonedaTransForm] = useState('PEN');
+  const [esCreditoForm, setEsCreditoForm] = useState(false);
+  const [cuentaSeleccionadaId, setCuentaSeleccionadaId] = useState('');
+  const [tarjetaSeleccionadaId, setTarjetaSeleccionadaId] = useState('');
+
+  const [mostrarModalCuenta, setMostrarModalCuenta] = useState(false);
+  const [cuentaEditandoId, setCuentaEditandoId] = useState(null);
+  const [nombreCuentaForm, setNombreCuentaForm] = useState('');
+  const [tipoCuentaForm, setTipoCuentaForm] = useState('Bancaria');
+  const [monedaCuentaForm, setMonedaCuentaForm] = useState('PEN');
+  const [saldoInicialCuentaForm, setSaldoInicialCuentaForm] = useState('0');
+  const [colorCuentaForm, setColorCuentaForm] = useState('#6366F1');
+
+  const [mostrarModalTransferencia, setMostrarModalTransferencia] = useState(false);
+  const [cuentaOrigenId, setCuentaOrigenId] = useState('');
+  const [cuentaDestinoId, setCuentaDestinoId] = useState('');
+  const [montoTransferenciaForm, setMontoTransferenciaForm] = useState('');
+
+  const [mostrarModalTarjeta, setMostrarModalTarjeta] = useState(false);
+  const [tarjetaEditandoId, setTarjetaEditandoId] = useState(null);
+  const [nombreTarjetaForm, setNombreTarjetaForm] = useState('');
+  const [limiteTarjetaForm, setLimiteTarjetaForm] = useState('');
+  const [diaVencimientoTarjetaForm, setDiaVencimientoTarjetaForm] = useState('');
+  const [deudaInicialTarjetaForm, setDeudaInicialTarjetaForm] = useState('');
+  const [monedaTarjetaForm, setMonedaTarjetaForm] = useState('PEN');
+
+  const [mostrarModalPagoTarjeta, setMostrarModalPagoTarjeta] = useState(false);
+  const [tarjetaAPagarId, setTarjetaAPagarId] = useState('');
+  const [cuentaOrigenPagoTarjetaId, setCuentaOrigenPagoTarjetaId] = useState('');
+  const [montoPagoTarjetaForm, setMontoPagoTarjetaForm] = useState('');
+
+  const [mostrarModalPrestamo, setMostrarModalPrestamo] = useState(false);
+  const [tipoPrestamoForm, setTipoPrestamoForm] = useState('tomado');
+  const [nombrePrestamoForm, setNombrePrestamoForm] = useState('');
+  const [prestamistaForm, setPrestamistaForm] = useState('');
+  const [montoTotalPrestamoForm, setMontoTotalPrestamoForm] = useState('');
+  const [montoPendientePrestamoForm, setMontoPendientePrestamoForm] = useState('');
+  const [diaVencimientoPrestamoForm, setDiaVencimientoPrestamoForm] = useState('');
+  const [monedaPrestamoForm, setMonedaPrestamoForm] = useState('PEN');
+
+  const [mostrarModalAbonoPrestamo, setMostrarModalAbonoPrestamo] = useState(false);
+  const [prestamoSeleccionadoId, setPrestamoSeleccionadoId] = useState('');
+  const [cuentaOrigenAbonoPrestamoId, setCuentaOrigenAbonoPrestamoId] = useState('');
+  const [montoAbonoPrestamo, setMontoAbonoPrestamo] = useState('');
+  const [monedaAbonoForm, setMonedaAbonoForm] = useState('PEN');
+
+  const [mostrarModalPresupuesto, setMostrarModalPresupuesto] = useState(false);
+  const [categoriaPresupuesto, setCategoriaPresupuesto] = useState(CATEGORIAS_GASTOS[0]);
+  const [limitePresupuestoForm, setLimitePresupuestoForm] = useState('');
+
+  const [mostrarModalRecurrente, setMostrarModalRecurrente] = useState(false);
+  const [tipoRecurrenteForm, setTipoRecurrenteForm] = useState('gasto');
+  const [montoRecurrenteForm, setMontoRecurrenteForm] = useState('');
+  const [descRecurrenteForm, setDescRecurrenteForm] = useState('');
+  const [categoriaRecurrenteForm, setCategoriaRecurrenteForm] = useState(CATEGORIAS_GASTOS[0]);
+  const [diaPagoRecurrenteForm, setDiaPagoRecurrenteForm] = useState('1');
+  const [monedaRecurrenteForm, setMonedaRecurrenteForm] = useState('PEN');
+  const [cuentaRecurrenteId, setCuentaRecurrenteId] = useState('');
+
+  const [mostrarModalMeta, setMostrarModalMeta] = useState(false);
+  const [nombreMetaForm, setNombreMetaForm] = useState('');
+  const [objetivoMetaForm, setObjetivoMetaForm] = useState('');
+  const [actualMetaForm, setActualMetaForm] = useState('');
+  const [fechaLimiteMetaForm, setFechaLimiteMetaForm] = useState('');
+
+  const [mostrarModalConfig, setMostrarModalConfig] = useState(false);
+  const [mostrarModalInfoData, setMostrarModalInfoData] = useState(false);
+  const [mensajeRespaldo, setMensajeRespaldo] = useState(null);
 
   // Conversor de divisas
   const convertirMoneda = (monto, monedaOrigen, monedaDestino = moneda) => {
@@ -172,6 +296,11 @@ export default function App() {
     if (monedaDestino === 'EUR') return enPen / (tiposCambio.EUR_PEN || 4.10);
 
     return enPen;
+  };
+
+  const formatoMoneda = (monto, codMoneda = moneda) => {
+    const sim = codMoneda === 'PEN' ? 'S/' : codMoneda === 'USD' ? '$' : '€';
+    return `${sim} ${Number(monto || 0).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
 
   const cambiarMesSiguiente = () => {
@@ -192,6 +321,7 @@ export default function App() {
     }
   };
 
+  // Auth Submit Handler
   const handleAuthSubmit = (e) => {
     e.preventDefault();
     setErrorAuth('');
@@ -214,7 +344,16 @@ export default function App() {
         setProcesandoAuth(false);
         return;
       }
-      usersDb[cleanUsername] = { password: passwordForm };
+      if (!respuestaForm.trim()) {
+        setErrorAuth('Por favor responde a la pregunta de seguridad.');
+        setProcesandoAuth(false);
+        return;
+      }
+      usersDb[cleanUsername] = { 
+        password: passwordForm,
+        preguntaSeguridad: preguntaForm,
+        respuestaSeguridad: respuestaForm.trim().toLowerCase()
+      };
       try {
         localStorage.setItem('finanzas_users_registry', JSON.stringify(usersDb));
       } catch (err) {
@@ -230,213 +369,113 @@ export default function App() {
       }
     }
 
-    const newUser = {
-      username: cleanUsername,
-      uid: `user_${cleanUsername}`
-    };
-
-    try {
-      localStorage.setItem('finanzas_active_user', JSON.stringify(newUser));
-    } catch (err) {}
-    setUser(newUser);
-    setUsernameForm('');
-    setPasswordForm('');
+    const newActiveUser = { username: cleanUsername, uid: `usr_${cleanUsername}_${Date.now()}` };
+    localStorage.setItem('finanzas_active_user', JSON.stringify(newActiveUser));
+    setUser(newActiveUser);
     setProcesandoAuth(false);
   };
 
+  const handleBorrarCachePagina = () => {
+    // Borra específicamente los datos guardados de esta aplicación web
+    Object.keys(localStorage).forEach(key => {
+      if (key.startsWith('finanzas_')) {
+        localStorage.removeItem(key);
+      }
+    });
+
+    // Limpia las cookies de este dominio si existieran
+    document.cookie.split(";").forEach((c) => {
+      document.cookie = c.replace(/^ +/, "").replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/");
+    });
+
+    setMostrarModalBorrarCache(false);
+    setConfirmarTextoBorrar('');
+    setUser(null);
+    setErrorAuth('Se ha limpiado la caché y datos locales de la aplicación correctamente.');
+  };
+
   const handleCerrarSesion = () => {
-    try {
-      localStorage.removeItem('finanzas_active_user');
-    } catch (err) {}
-    setModoAuth('login');
-    setErrorAuth('');
+    localStorage.removeItem('finanzas_active_user');
     setUser(null);
   };
 
-  useEffect(() => {
-    if (!user) {
-      setTransacciones([]);
-      setCuentasBancarias([]);
-      setTarjetas([]);
-      setPrestamos([]);
-      setMetas([]);
-      setPresupuestos({});
-      setRecurrentes([]);
-      setDarkMode(false);
+  const handleBuscarUsuarioRecuperacion = (e) => {
+    e.preventDefault();
+    setMensajeRecuperacion(null);
+    const cleanUsername = userRecuperar.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+
+    const registro = leerJSON('finanzas_users_registry', {});
+    const userData = registro[cleanUsername];
+
+    if (!userData) {
+      setMensajeRecuperacion({ tipo: 'error', texto: 'Nombre de usuario no encontrado.' });
       return;
     }
 
-    const username = user.username;
-    setTransacciones(loadUserData(username, 'transacciones', []));
+    setPreguntaUsuario(userData.preguntaSeguridad || '¿Cuál es el nombre de tu primera mascota?');
+    setPasoRecuperacion(2);
+  };
 
-    const cuentasGuardadas = loadUserData(username, 'cuentas_bancarias', null);
-    if (!cuentasGuardadas) {
-      const cuentasDefecto = [
-        { id: 'cta_bcp', nombre: 'BCP Débito', tipo: 'Bancaria', moneda: 'PEN', saldoInicial: 1000, color: '#3B82F6' },
-        { id: 'cta_yape', nombre: 'Yape', tipo: 'Billetera Digital', moneda: 'PEN', saldoInicial: 150, color: '#8B5CF6' },
-        { id: 'cta_plin', nombre: 'Plin', tipo: 'Billetera Digital', moneda: 'PEN', saldoInicial: 100, color: '#06B6D4' },
-        { id: 'cta_efectivo', nombre: 'Efectivo', tipo: 'Efectivo', moneda: 'PEN', saldoInicial: 100, color: '#10B981' }
-      ];
-      setCuentasBancarias(cuentasDefecto);
-    } else {
-      setCuentasBancarias(cuentasGuardadas);
+  const handleRestablecerPassword = (e) => {
+    e.preventDefault();
+    setMensajeRecuperacion(null);
+    const cleanUsername = userRecuperar.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+
+    const registro = leerJSON('finanzas_users_registry', {});
+    const userData = registro[cleanUsername];
+
+    if (!userData) {
+      setMensajeRecuperacion({ tipo: 'error', texto: 'Ocurrió un error al verificar los datos.' });
+      return;
     }
 
-    setTarjetas(loadUserData(username, 'tarjetas', []));
-    setPrestamos(loadUserData(username, 'prestamos', []));
-    setMetas(loadUserData(username, 'metas', []));
-    setPresupuestos(loadUserData(username, 'presupuestos', {}));
-    setRecurrentes(loadUserData(username, 'recurrentes', []));
-    setDarkMode(loadUserData(username, 'dark_mode', false));
-    setMoneda(loadUserData(username, 'moneda', 'PEN'));
-    setTiposCambio(loadUserData(username, 'tipos_cambio', { USD_PEN: 3.75, EUR_PEN: 4.10 }));
-  }, [user]);
+    const respGuardada = userData.respuestaSeguridad || '';
+    if (respGuardada && respuestaRecuperar.trim().toLowerCase() !== respGuardada) {
+      setMensajeRecuperacion({ tipo: 'error', texto: 'La respuesta de seguridad es incorrecta.' });
+      return;
+    }
 
-  useEffect(() => {
-    if (user?.username) saveUserData(user.username, 'transacciones', transacciones);
-  }, [transacciones, user]);
+    if (!nuevaPasswordForm) {
+      setMensajeRecuperacion({ tipo: 'error', texto: 'Ingresa una nueva contraseña.' });
+      return;
+    }
 
-  useEffect(() => {
-    if (user?.username) saveUserData(user.username, 'cuentas_bancarias', cuentasBancarias);
-  }, [cuentasBancarias, user]);
+    registro[cleanUsername].password = nuevaPasswordForm;
+    try {
+      localStorage.setItem('finanzas_users_registry', JSON.stringify(registro));
+      setMensajeRecuperacion({ tipo: 'ok', texto: '¡Contraseña actualizada correctamente! Ya puedes iniciar sesión.' });
+      setTimeout(() => {
+        setMostrarModalRecuperar(false);
+        setPasoRecuperacion(1);
+        setUserRecuperar('');
+        setRespuestaRecuperar('');
+        setNuevaPasswordForm('');
+        setMensajeRecuperacion(null);
+      }, 2000);
+    } catch (err) {
+      setMensajeRecuperacion({ tipo: 'error', texto: 'Error al actualizar la contraseña.' });
+    }
+  };
 
-  useEffect(() => {
-    if (user?.username) saveUserData(user.username, 'tarjetas', tarjetas);
-  }, [tarjetas, user]);
-
-  useEffect(() => {
-    if (user?.username) saveUserData(user.username, 'prestamos', prestamos);
-  }, [prestamos, user]);
-
-  useEffect(() => {
-    if (user?.username) saveUserData(user.username, 'metas', metas);
-  }, [metas, user]);
-
-  useEffect(() => {
-    if (user?.username) saveUserData(user.username, 'presupuestos', presupuestos);
-  }, [presupuestos, user]);
-
-  useEffect(() => {
-    if (user?.username) saveUserData(user.username, 'recurrentes', recurrentes);
-  }, [recurrentes, user]);
-
-  useEffect(() => {
-    if (user?.username) saveUserData(user.username, 'dark_mode', darkMode);
-  }, [darkMode, user]);
-
-  useEffect(() => {
-    if (user?.username) saveUserData(user.username, 'moneda', moneda);
-  }, [moneda, user]);
-
-  useEffect(() => {
-    if (user?.username) saveUserData(user.username, 'tipos_cambio', tiposCambio);
-  }, [tiposCambio, user]);
-
-  useEffect(() => {
-    document.documentElement.classList.toggle('dark', darkMode);
-  }, [darkMode]);
-
-  // --- MODALES Y FORMULARIOS ---
-  const [mostrarModalTransaccion, setMostrarModalTransaccion] = useState(false);
-  const [tipoForm, setTipoForm] = useState('gasto');
-  const [montoForm, setMontoForm] = useState('');
-  const [monedaTransForm, setMonedaTransForm] = useState('PEN');
-  const [descForm, setDescForm] = useState('');
-  const [categoriaForm, setCategoriaForm] = useState(CATEGORIAS_GASTOS[0]);
-  const [fechaForm, setFechaForm] = useState(new Date().toISOString().split('T')[0]);
-  const [esCreditoForm, setEsCreditoForm] = useState(false);
-  const [tarjetaSeleccionadaId, setTarjetaSeleccionadaId] = useState('');
-  const [cuentaSeleccionadaId, setCuentaSeleccionadaId] = useState('');
-
-  // Modales Cuentas Bancarias / Billeteras
-  const [mostrarModalCuenta, setMostrarModalCuenta] = useState(false);
-  const [nombreCuentaForm, setNombreCuentaForm] = useState('');
-  const [tipoCuentaForm, setTipoCuentaForm] = useState('Bancaria');
-  const [monedaCuentaForm, setMonedaCuentaForm] = useState('PEN');
-  const [saldoInicialCuentaForm, setSaldoInicialCuentaForm] = useState('');
-  const [colorCuentaForm, setColorCuentaForm] = useState('#6366F1');
-  const [cuentaEditandoId, setCuentaEditandoId] = useState(null);
-
-  // Modal Transferencia Entre Cuentas
-  const [mostrarModalTransferencia, setMostrarModalTransferencia] = useState(false);
-  const [cuentaOrigenId, setCuentaOrigenId] = useState('');
-  const [cuentaDestinoId, setCuentaDestinoId] = useState('');
-  const [montoTransferenciaForm, setMontoTransferenciaForm] = useState('');
-
-  // Modales Tarjetas
-  const [mostrarModalTarjeta, setMostrarModalTarjeta] = useState(false);
-  const [nombreTarjetaForm, setNombreTarjetaForm] = useState('');
-  const [limiteTarjetaForm, setLimiteTarjetaForm] = useState('');
-  const [diaVencimientoTarjetaForm, setDiaVencimientoTarjetaForm] = useState('');
-  const [monedaTarjetaForm, setMonedaTarjetaForm] = useState('PEN');
-  const [deudaInicialTarjetaForm, setDeudaInicialTarjetaForm] = useState('');
-  const [tarjetaEditandoId, setTarjetaEditandoId] = useState(null);
-
-  // Modal Pago Tarjeta
-  const [mostrarModalPagoTarjeta, setMostrarModalPagoTarjeta] = useState(false);
-  const [tarjetaAPagarId, setTarjetaAPagarId] = useState('');
-  const [montoPagoTarjetaForm, setMontoPagoTarjetaForm] = useState('');
-  const [cuentaOrigenPagoTarjetaId, setCuentaOrigenPagoTarjetaId] = useState('');
-
-  // Modales Préstamos
-  const [mostrarModalPrestamo, setMostrarModalPrestamo] = useState(false);
-  const [tipoPrestamoForm, setTipoPrestamoForm] = useState('tomado');
-  const [nombrePrestamoForm, setNombrePrestamoForm] = useState('');
-  const [prestamistaForm, setPrestamistaForm] = useState('');
-  const [montoTotalPrestamoForm, setMontoTotalPrestamoForm] = useState('');
-  const [montoPendientePrestamoForm, setMontoPendientePrestamoForm] = useState('');
-  const [diaVencimientoPrestamoForm, setDiaVencimientoPrestamoForm] = useState('');
-  const [monedaPrestamoForm, setMonedaPrestamoForm] = useState('PEN');
-
-  // Modales Abono Préstamo
-  const [mostrarModalAbonoPrestamo, setMostrarModalAbonoPrestamo] = useState(false);
-  const [prestamoSeleccionadoId, setPrestamoSeleccionadoId] = useState('');
-  const [montoAbonoPrestamo, setMontoAbonoPrestamo] = useState('');
-  const [monedaAbonoForm, setMonedaAbonoForm] = useState('PEN');
-  const [cuentaOrigenAbonoPrestamoId, setCuentaOrigenAbonoPrestamoId] = useState('');
-
-  // Modal Presupuestos
-  const [mostrarModalPresupuesto, setMostrarModalPresupuesto] = useState(false);
-  const [categoriaPresupuesto, setCategoriaPresupuesto] = useState(CATEGORIAS_GASTOS[0]);
-  const [limitePresupuestoForm, setLimitePresupuestoForm] = useState('');
-
-  // Modal Recurrentes
-  const [mostrarModalRecurrente, setMostrarModalRecurrente] = useState(false);
-  const [tipoRecurrenteForm, setTipoRecurrenteForm] = useState('gasto');
-  const [montoRecurrenteForm, setMontoRecurrenteForm] = useState('');
-  const [monedaRecurrenteForm, setMonedaRecurrenteForm] = useState('PEN');
-  const [descRecurrenteForm, setDescRecurrenteForm] = useState('');
-  const [categoriaRecurrenteForm, setCategoriaRecurrenteForm] = useState(CATEGORIAS_GASTOS[0]);
-  const [diaPagoRecurrenteForm, setDiaPagoRecurrenteForm] = useState('1');
-  const [cuentaRecurrenteId, setCuentaRecurrenteId] = useState('');
-
-  // Modales Metas e Info
-  const [mostrarModalMeta, setMostrarModalMeta] = useState(false);
-  const [nombreMetaForm, setNombreMetaForm] = useState('');
-  const [objetivoMetaForm, setObjetivoMetaForm] = useState('');
-  const [actualMetaForm, setActualMetaForm] = useState('');
-  const [fechaLimiteMetaForm, setFechaLimiteMetaForm] = useState('');
-  const [mostrarModalInfoData, setMostrarModalInfoData] = useState(false);
-  const [transaccionEditandoId, setTransaccionEditandoId] = useState(null);
-  const [mensajeRespaldo, setMensajeRespaldo] = useState(null);
-  const [mostrarModalConfig, setMostrarModalConfig] = useState(false);
-
-  // --- CÁLCULO DE SALDOS ACTUALES DE CUENTAS LÍQUIDAS ---
+  // Cálculo de saldos actuales por cuenta de manera dinámica
   const cuentasConSaldosActuales = useMemo(() => {
-    return cuentasBancarias.map(cta => {
+    return cuentasBancarias.map((cta, index) => {
       let saldo = Number(cta.saldoInicial || 0);
 
       transacciones.forEach(t => {
-        const montoEnMonedaCta = convertirMoneda(Number(t.monto || 0), t.moneda || 'PEN', cta.moneda || 'PEN');
+        const montoVal = Number(t.monto || 0);
+        const asignadaEstaCuenta = t.cuentaId === cta.id || (!t.cuentaId && index === 0);
 
-        if (t.cuentaId === cta.id) {
-          if (t.tipo === 'ingreso') {
-            saldo += montoEnMonedaCta;
-          } else if (t.tipo === 'gasto' || t.tipo === 'pago_tarjeta' || t.tipo === 'pago_prestamo' || t.tipo === 'transferencia_salida') {
-            saldo -= montoEnMonedaCta;
-          }
-        } else if (t.cuentaDestinoId === cta.id && t.tipo === 'transferencia_salida') {
-          saldo += montoEnMonedaCta;
+        if (t.tipo === 'ingreso' && asignadaEstaCuenta) {
+          saldo += convertirMoneda(montoVal, t.moneda || 'PEN', cta.moneda || 'PEN');
+        } else if ((t.tipo === 'gasto' && !t.esCredito && asignadaEstaCuenta) ||
+                   (t.tipo === 'pago_tarjeta' && asignadaEstaCuenta) ||
+                   (t.tipo === 'pago_prestamo' && asignadaEstaCuenta)) {
+          saldo -= convertirMoneda(montoVal, t.moneda || 'PEN', cta.moneda || 'PEN');
+        } else if (t.tipo === 'transferencia_salida' && asignadaEstaCuenta) {
+          saldo -= convertirMoneda(montoVal, t.moneda || 'PEN', cta.moneda || 'PEN');
+        } else if (t.tipo === 'transferencia_entrada' && asignadaEstaCuenta) {
+          saldo += convertirMoneda(montoVal, t.moneda || 'PEN', cta.moneda || 'PEN');
         }
       });
 
@@ -445,49 +484,44 @@ export default function App() {
         saldoActual: saldo
       };
     });
-  }, [cuentasBancarias, transacciones, tiposCambio, moneda]);
+  }, [cuentasBancarias, transacciones, tiposCambio]);
 
-  // Saldo Líquido Total en la Moneda Principal Elegida
   const saldoLiquidoTotal = useMemo(() => {
     return cuentasConSaldosActuales.reduce((acc, cta) => {
       return acc + convertirMoneda(cta.saldoActual, cta.moneda || 'PEN', moneda);
     }, 0);
   }, [cuentasConSaldosActuales, moneda, tiposCambio]);
 
-  // Nombres de métodos para los selectores
-  const todosLosMetodosDisponibles = useMemo(() => {
-    const nombresCuentas = cuentasBancarias.map(c => `Cuenta: ${c.nombre}`);
-    const nombresTarjetas = tarjetas.map(t => `Tarjeta: ${t.nombre}`);
-    return [...nombresCuentas, ...nombresTarjetas];
-  }, [cuentasBancarias, tarjetas]);
-
-  const transaccionesDelMes = useMemo(() => {
-    return transacciones.filter(t => {
-      if (!t.fecha) return false;
-      const fecha = new Date(t.fecha + 'T00:00:00');
-      return fecha.getMonth() === mesSeleccionado && fecha.getFullYear() === anioSeleccionado;
-    });
-  }, [transacciones, mesSeleccionado, anioSeleccionado]);
-
+  // Resumen del Mes Seleccionado
   const resumen = useMemo(() => {
-    const ingresos = transaccionesDelMes
-      .filter(t => t.tipo === 'ingreso')
-      .reduce((acc, t) => acc + convertirMoneda(Number(t.monto || 0), t.moneda || 'PEN', moneda), 0);
+    let ingresos = 0;
+    let gastosLiquidos = 0;
+    let gastosCredito = 0;
+    let pagosLiquidosEspeciales = 0;
 
-    const gastosLiquidos = transaccionesDelMes
-      .filter(t => t.tipo === 'gasto' && !t.esCredito)
-      .reduce((acc, t) => acc + convertirMoneda(Number(t.monto || 0), t.moneda || 'PEN', moneda), 0);
+    transacciones.forEach(t => {
+      const [yearStr, monthStr] = (t.fecha || '').split('-');
+      const y = parseInt(yearStr, 10);
+      const m = parseInt(monthStr, 10) - 1;
 
-    const gastosCredito = transaccionesDelMes
-      .filter(t => t.tipo === 'gasto' && t.esCredito)
-      .reduce((acc, t) => acc + convertirMoneda(Number(t.monto || 0), t.moneda || 'PEN', moneda), 0);
+      if (y === anioSeleccionado && m === mesSeleccionado) {
+        const montoConvertido = convertirMoneda(t.monto, t.moneda || 'PEN', moneda);
+        if (t.tipo === 'ingreso') {
+          ingresos += montoConvertido;
+        } else if (t.tipo === 'gasto') {
+          if (t.esCredito) {
+            gastosCredito += montoConvertido;
+          } else {
+            gastosLiquidos += montoConvertido;
+          }
+        } else if (t.tipo === 'pago_tarjeta' || t.tipo === 'pago_prestamo') {
+          pagosLiquidosEspeciales += montoConvertido;
+        }
+      }
+    });
 
-    const pagosLiquidosEspeciales = transaccionesDelMes
-      .filter(t => t.tipo === 'pago_tarjeta' || t.tipo === 'pago_prestamo')
-      .reduce((acc, t) => acc + convertirMoneda(Number(t.monto || 0), t.moneda || 'PEN', moneda), 0);
-
-    const totalGastosDelMes = gastosLiquidos + gastosCredito + pagosLiquidosEspeciales;
-    const flujoLiquidoBolsillo = ingresos - gastosLiquidos - pagosLiquidosEspeciales;
+    const totalGastosDelMes = gastosLiquidos + gastosCredito;
+    const balanceNetoMes = ingresos - totalGastosDelMes;
 
     return {
       ingresos,
@@ -495,486 +529,409 @@ export default function App() {
       gastosCredito,
       pagosLiquidosEspeciales,
       totalGastosDelMes,
-      flujoLiquidoBolsillo
+      balanceNetoMes
     };
-  }, [transaccionesDelMes, moneda, tiposCambio]);
+  }, [transacciones, mesSeleccionado, anioSeleccionado, moneda, tiposCambio]);
 
-  const datosAnuales = useMemo(() => {
-    const mapa = Array.from({ length: 12 }, (_, index) => ({
-      mes: NOMBRES_MESES[index].substring(0, 3),
-      Ingresos: 0,
-      Gastos: 0
-    }));
-
-    transacciones.forEach(t => {
-      if (!t.fecha) return;
-      const fecha = new Date(t.fecha + 'T00:00:00');
-      if (fecha.getFullYear() === anioSeleccionado) {
-        const m = fecha.getMonth();
-        const montoConv = convertirMoneda(Number(t.monto || 0), t.moneda || 'PEN', moneda);
-        if (t.tipo === 'ingreso') {
-          mapa[m].Ingresos += montoConv;
-        } else if (t.tipo === 'gasto' || t.tipo === 'pago_tarjeta' || t.tipo === 'pago_prestamo') {
-          mapa[m].Gastos += montoConv;
-        }
-      }
-    });
-
-    return mapa;
-  }, [transacciones, anioSeleccionado, moneda, tiposCambio]);
-
-  const tendenciaPatrimonioHistorico = useMemo(() => {
-    const historia = [];
-    const anioActual = anioSeleccionado;
-
-    let saldoLiquidoAcumulado = cuentasBancarias.reduce((acc, c) => acc + convertirMoneda(Number(c.saldoInicial || 0), c.moneda || 'PEN', moneda), 0);
-
-    for (let m = 0; m < 12; m++) {
-      const movsDelMes = transacciones.filter(t => {
-        if (!t.fecha) return false;
-        const f = new Date(t.fecha + 'T00:00:00');
-        return f.getFullYear() === anioActual && f.getMonth() === m;
-      });
-
-      const ingresosMes = movsDelMes
-        .filter(t => t.tipo === 'ingreso')
-        .reduce((acc, t) => acc + convertirMoneda(Number(t.monto || 0), t.moneda || 'PEN', moneda), 0);
-
-      const gastosLiquidosMes = movsDelMes
-        .filter(t => (t.tipo === 'gasto' && !t.esCredito) || t.tipo === 'pago_tarjeta' || t.tipo === 'pago_prestamo')
-        .reduce((acc, t) => acc + convertirMoneda(Number(t.monto || 0), t.moneda || 'PEN', moneda), 0);
-
-      saldoLiquidoAcumulado += (ingresosMes - gastosLiquidosMes);
-
-      const deudaTarjetas = tarjetas.reduce((acc, t) => acc + convertirMoneda(Number(t.deudaActual || 0), t.moneda || 'PEN', moneda), 0);
-      const deudaPrestamos = prestamos
-        .filter(p => p.tipo === 'tomado')
-        .reduce((acc, p) => acc + convertirMoneda(Number(p.montoPendiente || 0), p.moneda || 'PEN', moneda), 0);
-
-      const patrimonioNeto = saldoLiquidoAcumulado - deudaTarjetas - deudaPrestamos;
-
-      historia.push({
-        mes: NOMBRES_MESES[m].substring(0, 3),
-        'Patrimonio Neto': Math.round(patrimonioNeto * 100) / 100,
-        'Liquidez': Math.round(saldoLiquidoAcumulado * 100) / 100,
-        'Deuda Total': Math.round((deudaTarjetas + deudaPrestamos) * 100) / 100
-      });
-    }
-
-    return historia;
-  }, [transacciones, cuentasBancarias, tarjetas, prestamos, anioSeleccionado, moneda, tiposCambio]);
-
-  const gastosMesPorCategoria = useMemo(() => {
-    const mapa = {};
-    transaccionesDelMes
-      .filter(t => t.tipo === 'gasto')
-      .forEach(t => {
-        const montoConv = convertirMoneda(Number(t.monto || 0), t.moneda || 'PEN', moneda);
-        mapa[t.categoria] = (mapa[t.categoria] || 0) + montoConv;
-      });
-    return mapa;
-  }, [transaccionesDelMes, moneda, tiposCambio]);
-
-  const formatoMoneda = (valor, monedaPersonalizada = moneda) => {
-    return new Intl.NumberFormat(monedaPersonalizada === 'PEN' ? 'es-PE' : 'en-US', { 
-      style: 'currency', 
-      currency: monedaPersonalizada 
-    }).format(valor || 0);
-  };
-
-  const proximosVencimientos = useMemo(() => {
-    const hoy = new Date();
-    const diaActual = hoy.getDate();
-    const alertas = [];
+  // Resumen Tarjetas
+  const resumenTarjetas = useMemo(() => {
+    let deudaTotal = 0;
+    let limiteTotal = 0;
 
     tarjetas.forEach(t => {
-      if (t.diaVencimiento && Number(t.deudaActual) > 0) {
-        const diaVenc = Number(t.diaVencimiento);
-        let diasFaltantes = diaVenc - diaActual;
-        if (diasFaltantes < 0) diasFaltantes += 30;
+      deudaTotal += convertirMoneda(t.deudaActual || 0, t.moneda || 'PEN', moneda);
+      limiteTotal += convertirMoneda(t.limite || 0, t.moneda || 'PEN', moneda);
+    });
 
-        if (diasFaltantes <= 7) {
-          alertas.push({
-            id: `tarjeta_${t.id}`,
-            nombre: t.nombre,
+    return {
+      deudaTotal,
+      limiteTotal,
+      disponibleTotal: Math.max(0, limiteTotal - deudaTotal)
+    };
+  }, [tarjetas, moneda, tiposCambio]);
+
+  // Vencimientos Próximos
+  const proximosVencimientos = useMemo(() => {
+    const list = [];
+    const diaActual = new Date().getDate();
+
+    tarjetas.forEach(t => {
+      if (t.diaVencimiento) {
+        const dVenc = Number(t.diaVencimiento);
+        const dif = dVenc - diaActual;
+        if (dif >= 0 && dif <= 7) {
+          list.push({
+            id: `tarj_${t.id}`,
             tipo: 'Tarjeta',
-            montoTexto: formatoMoneda(t.deudaActual, t.moneda || 'PEN'),
-            dias: diasFaltantes,
-            diaPago: diaVenc
+            nombre: t.nombre,
+            diaPago: dVenc,
+            dias: dif,
+            montoTexto: formatoMoneda(t.deudaActual, t.moneda || 'PEN')
           });
         }
       }
     });
 
     prestamos.forEach(p => {
-      if (p.diaVencimiento && p.tipo === 'tomado' && Number(p.montoPendiente) > 0) {
-        const diaVenc = Number(p.diaVencimiento);
-        let diasFaltantes = diaVenc - diaActual;
-        if (diasFaltantes < 0) diasFaltantes += 30;
-
-        if (diasFaltantes <= 7) {
-          alertas.push({
-            id: `prestamo_${p.id}`,
-            nombre: p.nombre,
+      if (p.diaVencimiento && p.tipo === 'tomado' && p.montoPendiente > 0) {
+        const dVenc = Number(p.diaVencimiento);
+        const dif = dVenc - diaActual;
+        if (dif >= 0 && dif <= 7) {
+          list.push({
+            id: `prest_${p.id}`,
             tipo: 'Préstamo',
-            montoTexto: formatoMoneda(p.montoPendiente, p.moneda || 'PEN'),
-            dias: diasFaltantes,
-            diaPago: diaVenc
+            nombre: p.nombre,
+            diaPago: dVenc,
+            dias: dif,
+            montoTexto: formatoMoneda(p.montoPendiente, p.moneda || 'PEN')
           });
         }
       }
     });
 
-    return alertas.sort((a, b) => a.dias - b.dias);
-  }, [tarjetas, prestamos, moneda, tiposCambio]);
+    return list.sort((a, b) => a.dias - b.dias);
+  }, [tarjetas, prestamos]);
 
-  const resumenTarjetas = useMemo(() => {
-    const limiteTotal = tarjetas.reduce((acc, t) => acc + convertirMoneda(Number(t.limite || 0), t.moneda || 'PEN', moneda), 0);
-    const deudaTotal = tarjetas.reduce((acc, t) => acc + convertirMoneda(Number(t.deudaActual || 0), t.moneda || 'PEN', moneda), 0);
-    const disponibleTotal = Math.max(0, limiteTotal - deudaTotal);
+  // Gastos por categoría para presupuestos del mes
+  const gastosMesPorCategoria = useMemo(() => {
+    const map = {};
+    transacciones.forEach(t => {
+      const [yearStr, monthStr] = (t.fecha || '').split('-');
+      const y = parseInt(yearStr, 10);
+      const m = parseInt(monthStr, 10) - 1;
 
-    return { limiteTotal, deudaTotal, disponibleTotal };
-  }, [tarjetas, moneda, tiposCambio]);
-
-  const resumenPrestamos = useMemo(() => {
-    const deudasPorPrestamos = prestamos
-      .filter(p => p.tipo === 'tomado')
-      .reduce((acc, p) => acc + convertirMoneda(Number(p.montoPendiente || 0), p.moneda || 'PEN', moneda), 0);
-
-    const cobranzasPorPrestamos = prestamos
-      .filter(p => p.tipo === 'otorgado')
-      .reduce((acc, p) => acc + convertirMoneda(Number(p.montoPendiente || 0), p.moneda || 'PEN', moneda), 0);
-
-    return { deudasPorPrestamos, cobranzasPorPrestamos };
-  }, [prestamos, moneda, tiposCambio]);
-
-  const datosGastosPorCategoria = useMemo(() => {
-    const mapa = {};
-    transaccionesDelMes
-      .filter(t => t.tipo === 'gasto')
-      .forEach(t => {
-        const montoConvertido = convertirMoneda(Number(t.monto || 0), t.moneda || 'PEN', moneda);
-        mapa[t.categoria] = (mapa[t.categoria] || 0) + montoConvertido;
-      });
-
-    return Object.keys(mapa).map(cat => ({
-      name: cat,
-      value: mapa[cat]
-    }));
-  }, [transaccionesDelMes, moneda, tiposCambio]);
-
-  const datosComparativos = useMemo(() => {
-    return [
-      { 
-        nombre: `${NOMBRES_MESES[mesSeleccionado]}`, 
-        Ingresos: resumen.ingresos, 
-        'Gastos Líquidos': resumen.gastosLiquidos + resumen.pagosLiquidosEspeciales,
-        'Gastos Crédito': resumen.gastosCredito
+      if (y === anioSeleccionado && m === mesSeleccionado && t.tipo === 'gasto') {
+        const montoConv = convertirMoneda(t.monto, t.moneda || 'PEN', moneda);
+        map[t.categoria] = (map[t.categoria] || 0) + montoConv;
       }
-    ];
-  }, [resumen, mesSeleccionado]);
-
-  const transaccionesFiltradas = useMemo(() => {
-    return transaccionesDelMes.filter(t => {
-      const desc = t.descripcion || '';
-      const cat = t.categoria || '';
-      const coincideBusqueda = desc.toLowerCase().includes(busqueda.toLowerCase()) ||
-                                cat.toLowerCase().includes(busqueda.toLowerCase());
-      const coincideTipo = filtroTipo === 'todos' || t.tipo === filtroTipo;
-      const coincideCategoria = filtroCategoria === 'todas' || t.categoria === filtroCategoria;
-      const coincideMetodo = filtroMetodo === 'todos' || t.metodo === filtroMetodo;
-
-      return coincideBusqueda && coincideTipo && coincideCategoria && coincideMetodo;
     });
-  }, [transaccionesDelMes, busqueda, filtroTipo, filtroCategoria, filtroMetodo]);
+    return map;
+  }, [transacciones, mesSeleccionado, anioSeleccionado, moneda, tiposCambio]);
 
-  // --- ACCIONES DE CUENTAS BANCARIAS ---
-  const guardarCuenta = (e) => {
+  // Transacciones Filtradas
+  const transaccionesFiltradas = useMemo(() => {
+    return transacciones.filter(t => {
+      const [yearStr, monthStr] = (t.fecha || '').split('-');
+      const y = parseInt(yearStr, 10);
+      const m = parseInt(monthStr, 10) - 1;
+
+      if (y !== anioSeleccionado || m !== mesSeleccionado) return false;
+
+      if (filtroTipo !== 'todos' && t.tipo !== filtroTipo) return false;
+      if (filtroCategoria !== 'todas' && t.categoria !== filtroCategoria) return false;
+      if (filtroMetodo !== 'todos' && t.metodo !== filtroMetodo) return false;
+
+      if (busqueda.trim()) {
+        const q = busqueda.toLowerCase();
+        const descMatch = (t.descripcion || '').toLowerCase().includes(q);
+        const catMatch = (t.categoria || '').toLowerCase().includes(q);
+        const metMatch = (t.metodo || '').toLowerCase().includes(q);
+        return descMatch || catMatch || metMatch;
+      }
+
+      return true;
+    }).sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
+  }, [transacciones, mesSeleccionado, anioSeleccionado, filtroTipo, filtroCategoria, filtroMetodo, busqueda]);
+
+  const todosLosMetodosDisponibles = useMemo(() => {
+    const list = cuentasBancarias.map(c => c.nombre);
+    tarjetas.forEach(t => list.push(t.nombre));
+    return Array.from(new Set(list));
+  }, [cuentasBancarias, tarjetas]);
+
+  // Handlers CRUD
+  const abrirNuevaTransaccion = () => {
+    setTransaccionEditandoId(null);
+    setTipoForm('gasto');
+    setMontoForm('');
+    setDescForm('');
+    setCategoriaForm(CATEGORIAS_GASTOS[0]);
+    setFechaForm(new Date().toISOString().split('T')[0]);
+    setMonedaTransForm(moneda);
+    setEsCreditoForm(false);
+    if (cuentasBancarias.length > 0) setCuentaSeleccionadaId(cuentasBancarias[0].id);
+    if (tarjetas.length > 0) setTarjetaSeleccionadaId(tarjetas[0].id);
+    setMostrarModalTransaccion(true);
+  };
+
+  const abrirEdicionTransaccion = (t) => {
+    setTransaccionEditandoId(t.id);
+    setTipoForm(t.tipo);
+    setMontoForm(String(t.monto));
+    setDescForm(t.descripcion);
+    setCategoriaForm(t.categoria);
+    setFechaForm(t.fecha);
+    setMonedaTransForm(t.moneda || 'PEN');
+    setEsCreditoForm(!!t.esCredito);
+    setCuentaSeleccionadaId(t.cuentaId || '');
+    setTarjetaSeleccionadaId(t.tarjetaId || '');
+    setMostrarModalTransaccion(true);
+  };
+
+  const agregarTransaccion = (e) => {
     e.preventDefault();
-    if (!user || !nombreCuentaForm) return;
+    if (!montoForm || parseFloat(montoForm) <= 0) return;
 
-    if (cuentaEditandoId) {
-      setCuentasBancarias(prev => prev.map(c => {
-        if (c.id === cuentaEditandoId) {
-          return {
-            ...c,
-            nombre: nombreCuentaForm,
-            tipo: tipoCuentaForm,
-            moneda: monedaCuentaForm,
-            saldoInicial: parseFloat(saldoInicialCuentaForm) || 0,
-            color: colorCuentaForm
-          };
-        }
-        return c;
-      }));
+    let nombreMetodo = '';
+    let targetCuentaId = null;
+    let targetTarjetaId = null;
+
+    if (tipoForm === 'gasto' && esCreditoForm) {
+      const tarj = tarjetas.find(t => t.id === tarjetaSeleccionadaId);
+      if (!tarj) return;
+      nombreMetodo = tarj.nombre;
+      targetTarjetaId = tarj.id;
     } else {
-      const nuevaCuenta = {
-        id: `cta_${Date.now()}`,
-        nombre: nombreCuentaForm,
-        tipo: tipoCuentaForm,
-        moneda: monedaCuentaForm,
-        saldoInicial: parseFloat(saldoInicialCuentaForm) || 0,
-        color: colorCuentaForm,
-        createdAt: new Date().toISOString()
-      };
-      setCuentasBancarias(prev => [...prev, nuevaCuenta]);
+      const cta = cuentasConSaldosActuales.find(c => c.id === cuentaSeleccionadaId) || cuentasConSaldosActuales[0];
+      if (!cta) return;
+      nombreMetodo = cta.nombre;
+      targetCuentaId = cta.id;
     }
 
-    setNombreCuentaForm('');
-    setSaldoInicialCuentaForm('');
-    setCuentaEditandoId(null);
+    const nuevaTrans = {
+      id: transaccionEditandoId || `trans_${Date.now()}`,
+      tipo: tipoForm,
+      monto: parseFloat(montoForm),
+      descripcion: descForm || (tipoForm === 'ingreso' ? 'Ingreso' : 'Gasto'),
+      categoria: categoriaForm,
+      fecha: fechaForm,
+      moneda: monedaTransForm,
+      esCredito: esCreditoForm,
+      cuentaId: targetCuentaId,
+      tarjetaId: targetTarjetaId,
+      metodo: nombreMetodo
+    };
+
+    if (transaccionEditandoId) {
+      setTransacciones(prev => prev.map(t => t.id === transaccionEditandoId ? nuevaTrans : t));
+    } else {
+      setTransacciones(prev => [nuevaTrans, ...prev]);
+    }
+
+    // Actualizar saldo de tarjeta si fue a crédito
+    if (esCreditoForm && targetTarjetaId) {
+      setTarjetas(prev => prev.map(t => {
+        if (t.id === targetTarjetaId) {
+          const delta = transaccionEditandoId ? 0 : parseFloat(montoForm); // ajuste básico
+          return { ...t, deudaActual: (t.deudaActual || 0) + delta };
+        }
+        return t;
+      }));
+    }
+
+    setMostrarModalTransaccion(false);
+  };
+
+  const eliminarTransaccion = (t) => {
+    if (confirm('¿Deseas eliminar este registro de movimiento?')) {
+      setTransacciones(prev => prev.filter(item => item.id !== t.id));
+    }
+  };
+
+  // Cuentas Handlers
+  const guardarCuenta = (e) => {
+    e.preventDefault();
+    if (!nombreCuentaForm.trim()) return;
+
+    const nuevaCta = {
+      id: cuentaEditandoId || `cta_${Date.now()}`,
+      nombre: nombreCuentaForm.trim(),
+      tipo: tipoCuentaForm,
+      moneda: monedaCuentaForm,
+      saldoInicial: parseFloat(saldoInicialCuentaForm) || 0,
+      color: colorCuentaForm
+    };
+
+    if (cuentaEditandoId) {
+      setCuentasBancarias(prev => prev.map(c => c.id === cuentaEditandoId ? nuevaCta : c));
+    } else {
+      setCuentasBancarias(prev => [...prev, nuevaCta]);
+    }
+
     setMostrarModalCuenta(false);
   };
 
   const eliminarCuenta = (id) => {
     if (cuentasBancarias.length <= 1) {
-      alert('Debes mantener al menos una cuenta o billetera.');
+      alert('Debes mantener al menos una cuenta líquida activa.');
       return;
     }
-    setCuentasBancarias(prev => prev.filter(c => c.id !== id));
+    if (confirm('¿Seguro de eliminar esta cuenta?')) {
+      setCuentasBancarias(prev => prev.filter(c => c.id !== id));
+    }
   };
 
   const realizarTransferencia = (e) => {
     e.preventDefault();
-    if (!cuentaOrigenId || !cuentaDestinoId || !montoTransferenciaForm || Number(montoTransferenciaForm) <= 0) return;
-    if (cuentaOrigenId === cuentaDestinoId) return;
+    const monto = parseFloat(montoTransferenciaForm);
+    if (!monto || monto <= 0 || cuentaOrigenId === cuentaDestinoId) return;
 
-    const orig = cuentasBancarias.find(c => c.id === cuentaOrigenId);
-    const dest = cuentasBancarias.find(c => c.id === cuentaDestinoId);
-    if (!orig || !dest) return;
+    const ctaOrigen = cuentasConSaldosActuales.find(c => c.id === cuentaOrigenId);
+    const ctaDestino = cuentasConSaldosActuales.find(c => c.id === cuentaDestinoId);
+    if (!ctaOrigen || !ctaDestino) return;
 
-    const montoNum = parseFloat(montoTransferenciaForm);
-
-    const nuevaTrans = {
-      id: Date.now().toString(),
+    const fecha = new Date().toISOString().split('T')[0];
+    const transSalida = {
+      id: `trans_out_${Date.now()}`,
       tipo: 'transferencia_salida',
-      monto: montoNum,
-      moneda: orig.moneda || 'PEN',
-      categoria: 'Transferencia',
-      esCredito: false,
-      cuentaId: orig.id,
-      cuentaDestinoId: dest.id,
-      metodo: `Cuenta: ${orig.nombre}`,
-      fecha: new Date().toISOString().split('T')[0],
-      descripcion: `Transferencia de ${orig.nombre} a ${dest.nombre}`,
-      createdAt: new Date().toISOString()
+      monto: monto,
+      descripcion: `Transferencia hacia ${ctaDestino.nombre}`,
+      categoria: 'Otros Gastos',
+      fecha,
+      moneda: ctaOrigen.moneda || 'PEN',
+      cuentaId: ctaOrigen.id,
+      metodo: ctaOrigen.nombre
     };
 
-    setTransacciones(prev => [nuevaTrans, ...prev]);
-    setMontoTransferenciaForm('');
+    const transEntrada = {
+      id: `trans_in_${Date.now()}`,
+      tipo: 'transferencia_entrada',
+      monto: convertirMoneda(monto, ctaOrigen.moneda || 'PEN', ctaDestino.moneda || 'PEN'),
+      descripcion: `Transferencia desde ${ctaOrigen.nombre}`,
+      categoria: 'Otros Ingresos',
+      fecha,
+      moneda: ctaDestino.moneda || 'PEN',
+      cuentaId: ctaDestino.id,
+      metodo: ctaDestino.nombre
+    };
+
+    setTransacciones(prev => [transSalida, transEntrada, ...prev]);
     setMostrarModalTransferencia(false);
+    setMontoTransferenciaForm('');
   };
 
-  const agregarTransaccion = (e) => {
-    e.preventDefault();
-    if (!user || !montoForm || Number(montoForm) <= 0) return;
-
-    const montoNum = parseFloat(montoForm);
-    let nombreMetodo = '';
-    let cuentaAsignadaId = null;
-
-    if (tipoForm === 'gasto' && esCreditoForm) {
-      const tarjetaObj = tarjetas.find(t => t.id === tarjetaSeleccionadaId);
-      nombreMetodo = tarjetaObj ? `Tarjeta: ${tarjetaObj.nombre}` : 'Tarjeta de Crédito';
-    } else {
-      const ctaObj = cuentasBancarias.find(c => c.id === cuentaSeleccionadaId);
-      nombreMetodo = ctaObj ? `Cuenta: ${ctaObj.nombre}` : 'Cuenta Líquida';
-      cuentaAsignadaId = cuentaSeleccionadaId || (cuentasBancarias[0] ? cuentasBancarias[0].id : null);
-    }
-
-    if (transaccionEditandoId) {
-      const vieja = transacciones.find(t => t.id === transaccionEditandoId);
-      if (vieja) {
-        const esCreditoNueva = tipoForm === 'gasto' && esCreditoForm;
-        const editada = {
-          ...vieja,
-          tipo: tipoForm,
-          monto: montoNum,
-          moneda: monedaTransForm,
-          categoria: categoriaForm,
-          esCredito: esCreditoNueva,
-          tarjetaId: esCreditoNueva ? tarjetaSeleccionadaId : null,
-          cuentaId: !esCreditoNueva ? cuentaAsignadaId : null,
-          metodo: nombreMetodo,
-          fecha: fechaForm,
-          descripcion: descForm || (tipoForm === 'gasto' ? 'Gasto registrado' : 'Ingreso registrado'),
-          editadoEn: new Date().toISOString()
-        };
-        setTransacciones(prev => prev.map(t => (t.id === vieja.id ? editada : t)));
-
-        const afectabaTarjeta = vieja.tipo === 'gasto' && vieja.esCredito && vieja.tarjetaId;
-        const afectaTarjeta = editada.tipo === 'gasto' && editada.esCredito && editada.tarjetaId;
-        if (afectabaTarjeta || afectaTarjeta) {
-          setTarjetas(prev => prev.map(tar => {
-            let deuda = tar.deudaActual || 0;
-            if (afectabaTarjeta && tar.id === vieja.tarjetaId) {
-              deuda = Math.max(0, deuda - convertirMoneda(Number(vieja.monto), vieja.moneda || 'PEN', tar.moneda || 'PEN'));
-            }
-            if (afectaTarjeta && tar.id === editada.tarjetaId) {
-              deuda += convertirMoneda(editada.monto, editada.moneda, tar.moneda || 'PEN');
-            }
-            return deuda === (tar.deudaActual || 0) ? tar : { ...tar, deudaActual: deuda };
-          }));
-        }
-      }
-      setTransaccionEditandoId(null);
-      setMontoForm('');
-      setDescForm('');
-      setMostrarModalTransaccion(false);
-      return;
-    }
-
-    const nuevaTrans = {
-      id: Date.now().toString(),
-      tipo: tipoForm,
-      monto: montoNum,
-      moneda: monedaTransForm,
-      categoria: categoriaForm,
-      esCredito: tipoForm === 'gasto' ? esCreditoForm : false,
-      tarjetaId: (tipoForm === 'gasto' && esCreditoForm) ? tarjetaSeleccionadaId : null,
-      cuentaId: (tipoForm === 'ingreso' || !esCreditoForm) ? cuentaAsignadaId : null,
-      metodo: nombreMetodo,
-      fecha: fechaForm,
-      descripcion: descForm || (tipoForm === 'gasto' ? 'Gasto registrado' : 'Ingreso registrado'),
-      createdAt: new Date().toISOString()
-    };
-
-    setTransacciones(prev => [nuevaTrans, ...prev]);
-
-    if (tipoForm === 'gasto' && esCreditoForm && tarjetaSeleccionadaId) {
-      setTarjetas(prev => prev.map(t => {
-        if (t.id === tarjetaSeleccionadaId) {
-          const montoEnMonedaTarjeta = convertirMoneda(montoNum, monedaTransForm, t.moneda || 'PEN');
-          return { ...t, deudaActual: (t.deudaActual || 0) + montoEnMonedaTarjeta };
-        }
-        return t;
-      }));
-    }
-
-    setMontoForm('');
-    setDescForm('');
-    setMostrarModalTransaccion(false);
-  };
-
+  // Tarjetas Handlers
   const guardarTarjeta = (e) => {
     e.preventDefault();
-    if (!user || !nombreTarjetaForm || !limiteTarjetaForm) return;
+    if (!nombreTarjetaForm.trim() || !limiteTarjetaForm) return;
 
-    if (tarjetaEditandoId) {
-      setTarjetas(prev => prev.map(t => {
-        if (t.id === tarjetaEditandoId) {
-          return {
-            ...t,
-            nombre: nombreTarjetaForm,
-            limite: parseFloat(limiteTarjetaForm),
-            diaVencimiento: diaVencimientoTarjetaForm || null,
-            moneda: monedaTarjetaForm,
-            deudaActual: parseFloat(deudaInicialTarjetaForm) || 0
-          };
-        }
-        return t;
-      }));
-    } else {
-      const nuevaTarjeta = {
-        id: Date.now().toString(),
-        nombre: nombreTarjetaForm,
-        limite: parseFloat(limiteTarjetaForm),
-        diaVencimiento: diaVencimientoTarjetaForm || null,
-        moneda: monedaTarjetaForm,
-        deudaActual: parseFloat(deudaInicialTarjetaForm) || 0,
-        createdAt: new Date().toISOString()
-      };
-      setTarjetas(prev => [...prev, nuevaTarjeta]);
-      if (!tarjetaSeleccionadaId) setTarjetaSeleccionadaId(nuevaTarjeta.id);
-    }
+    const nuevaTarjeta = {
+      id: tarjetaEditandoId || `tarj_${Date.now()}`,
+      nombre: nombreTarjetaForm.trim(),
+      limite: parseFloat(limiteTarjetaForm),
+      diaVencimiento: diaVencimientoTarjetaForm ? parseInt(diaVencimientoTarjetaForm, 10) : null,
+      deudaActual: parseFloat(deudaInicialTarjetaForm) || 0,
+      moneda: monedaTarjetaForm
+    };
 
-    setNombreTarjetaForm('');
-    setLimiteTarjetaForm('');
-    setDiaVencimientoTarjetaForm('');
-    setDeudaInicialTarjetaForm('');
-    setTarjetaEditandoId(null);
+    setTarjetas(prev => [...prev, nuevaTarjeta]);
     setMostrarModalTarjeta(false);
   };
 
   const eliminarTarjeta = (id) => {
-    setTarjetas(prev => prev.filter(t => t.id !== id));
+    if (confirm('¿Deseas eliminar esta tarjeta?')) {
+      setTarjetas(prev => prev.filter(t => t.id !== id));
+    }
   };
 
   const registrarPagoTarjeta = (e) => {
     e.preventDefault();
-    if (!montoPagoTarjetaForm || !tarjetaAPagarId || !cuentaOrigenPagoTarjetaId || Number(montoPagoTarjetaForm) <= 0) return;
+    const monto = parseFloat(montoPagoTarjetaForm);
+    if (!monto || monto <= 0 || !tarjetaAPagarId || !cuentaOrigenPagoTarjetaId) return;
 
-    const montoNum = parseFloat(montoPagoTarjetaForm);
-    const tarObj = tarjetas.find(t => t.id === tarjetaAPagarId);
-    const ctaObj = cuentasBancarias.find(c => c.id === cuentaOrigenPagoTarjetaId);
-    if (!tarObj || !ctaObj) return;
+    const tarj = tarjetas.find(t => t.id === tarjetaAPagarId);
+    const cta = cuentasConSaldosActuales.find(c => c.id === cuentaOrigenPagoTarjetaId);
+    if (!tarj || !cta) return;
 
-    const nuevaTrans = {
-      id: Date.now().toString(),
+    const fecha = new Date().toISOString().split('T')[0];
+    const pagoMov = {
+      id: `pago_tarj_${Date.now()}`,
       tipo: 'pago_tarjeta',
-      monto: montoNum,
-      moneda: tarObj.moneda || 'PEN',
+      monto: monto,
+      descripcion: `Pago de Tarjeta: ${tarj.nombre}`,
       categoria: 'Pago de Tarjeta',
-      esCredito: false,
-      cuentaId: ctaObj.id,
-      metodo: `Cuenta: ${ctaObj.nombre}`,
-      fecha: new Date().toISOString().split('T')[0],
-      descripcion: `Pago líquido a tarjeta ${tarObj.nombre} desde ${ctaObj.nombre}`,
-      createdAt: new Date().toISOString()
+      fecha,
+      moneda: cta.moneda || 'PEN',
+      cuentaId: cta.id,
+      metodo: cta.nombre
     };
 
-    setTransacciones(prev => [nuevaTrans, ...prev]);
-
+    setTransacciones(prev => [pagoMov, ...prev]);
     setTarjetas(prev => prev.map(t => {
-      if (t.id === tarjetaAPagarId) {
-        return { ...t, deudaActual: Math.max(0, (t.deudaActual || 0) - montoNum) };
+      if (t.id === tarj.id) {
+        const montoEnMonedaTarjeta = convertirMoneda(monto, cta.moneda || 'PEN', t.moneda || 'PEN');
+        return { ...t, deudaActual: Math.max(0, (t.deudaActual || 0) - montoEnMonedaTarjeta) };
       }
       return t;
     }));
 
-    setMontoPagoTarjetaForm('');
     setMostrarModalPagoTarjeta(false);
+    setMontoPagoTarjetaForm('');
   };
 
+  // Préstamos Handlers
   const guardarPrestamo = (e) => {
     e.preventDefault();
-    if (!user || !nombrePrestamoForm || !montoTotalPrestamoForm) return;
+    if (!nombrePrestamoForm.trim() || !montoTotalPrestamoForm) return;
 
-    const montoTotal = parseFloat(montoTotalPrestamoForm);
-    const montoPendiente = montoPendientePrestamoForm ? parseFloat(montoPendientePrestamoForm) : montoTotal;
+    const mTotal = parseFloat(montoTotalPrestamoForm);
+    const mPend = montoPendientePrestamoForm ? parseFloat(montoPendientePrestamoForm) : mTotal;
 
-    const nuevoPrestamo = {
-      id: Date.now().toString(),
+    const nuevoP = {
+      id: `prest_${Date.now()}`,
       tipo: tipoPrestamoForm,
-      nombre: nombrePrestamoForm,
-      entidad: prestamistaForm || 'Sin especificar',
-      montoTotal: montoTotal,
-      montoPendiente: montoPendiente,
-      diaVencimiento: diaVencimientoPrestamoForm || null,
-      moneda: monedaPrestamoForm,
-      createdAt: new Date().toISOString()
+      nombre: nombrePrestamoForm.trim(),
+      entidad: prestamistaForm.trim() || 'Particular',
+      montoTotal: mTotal,
+      montoPendiente: mPend,
+      diaVencimiento: diaVencimientoPrestamoForm ? parseInt(diaVencimientoPrestamoForm, 10) : null,
+      moneda: monedaPrestamoForm
     };
 
-    setPrestamos(prev => [...prev, nuevoPrestamo]);
-    setNombrePrestamoForm('');
-    setPrestamistaForm('');
-    setMontoTotalPrestamoForm('');
-    setMontoPendientePrestamoForm('');
-    setDiaVencimientoPrestamoForm('');
+    setPrestamos(prev => [...prev, nuevoP]);
     setMostrarModalPrestamo(false);
   };
 
-  const guardarPresupuesto = (e) => {
-    e.preventDefault();
-    if (!categoriaPresupuesto || !limitePresupuestoForm) return;
+  const eliminarPrestamo = (id) => {
+    if (confirm('¿Deseas eliminar este registro de préstamo?')) {
+      setPrestamos(prev => prev.filter(p => p.id !== id));
+    }
+  };
 
-    setPresupuestos(prev => ({
-      ...prev,
-      [categoriaPresupuesto]: parseFloat(limitePresupuestoForm)
+  const registrarAbonoPrestamo = (e) => {
+    e.preventDefault();
+    const monto = parseFloat(montoAbonoPrestamo);
+    if (!monto || monto <= 0 || !prestamoSeleccionadoId || !cuentaOrigenAbonoPrestamoId) return;
+
+    const prest = prestamos.find(p => p.id === prestamoSeleccionadoId);
+    const cta = cuentasConSaldosActuales.find(c => c.id === cuentaOrigenAbonoPrestamoId);
+    if (!prest || !cta) return;
+
+    const fecha = new Date().toISOString().split('T')[0];
+    const abonoMov = {
+      id: `abono_prest_${Date.now()}`,
+      tipo: 'pago_prestamo',
+      monto: monto,
+      descripcion: `Cuota / Abono Préstamo: ${prest.nombre}`,
+      categoria: 'Pago de Préstamo',
+      fecha,
+      moneda: cta.moneda || 'PEN',
+      cuentaId: cta.id,
+      metodo: cta.nombre
+    };
+
+    setTransacciones(prev => [abonoMov, ...prev]);
+    setPrestamos(prev => prev.map(p => {
+      if (p.id === prest.id) {
+        const montoEnMonedaPrestamo = convertirMoneda(monto, cta.moneda || 'PEN', p.moneda || 'PEN');
+        return { ...p, montoPendiente: Math.max(0, (p.montoPendiente || 0) - montoEnMonedaPrestamo) };
+      }
+      return p;
     }));
 
-    setLimitePresupuestoForm('');
+    setMostrarModalAbonoPrestamo(false);
+    setMontoAbonoPrestamo('');
+  };
+
+  // Presupuestos Handlers
+  const guardarPresupuesto = (e) => {
+    e.preventDefault();
+    const limite = parseFloat(limitePresupuestoForm);
+    if (!limite || limite <= 0) return;
+
+    setPresupuestos(prev => ({ ...prev, [categoriaPresupuesto]: limite }));
     setMostrarModalPresupuesto(false);
+    setLimitePresupuestoForm('');
   };
 
   const eliminarPresupuesto = (cat) => {
@@ -985,271 +942,134 @@ export default function App() {
     });
   };
 
+  // Recurrentes Handlers
   const guardarRecurrente = (e) => {
     e.preventDefault();
-    if (!montoRecurrenteForm || !descRecurrenteForm) return;
+    const monto = parseFloat(montoRecurrenteForm);
+    if (!monto || monto <= 0 || !descRecurrenteForm.trim()) return;
 
-    const ctaObj = cuentasBancarias.find(c => c.id === cuentaRecurrenteId);
+    const ctaId = cuentaRecurrenteId || (cuentasBancarias.length > 0 ? cuentasBancarias[0].id : null);
+    const ctaObj = cuentasBancarias.find(c => c.id === ctaId);
 
-    const nuevo = {
-      id: Date.now().toString(),
+    const nuevoRec = {
+      id: `rec_${Date.now()}`,
       tipo: tipoRecurrenteForm,
-      monto: parseFloat(montoRecurrenteForm),
-      moneda: monedaRecurrenteForm,
+      monto,
+      descripcion: descRecurrenteForm.trim(),
       categoria: categoriaRecurrenteForm,
-      descripcion: descRecurrenteForm,
       diaPago: parseInt(diaPagoRecurrenteForm, 10) || 1,
-      cuentaId: cuentaRecurrenteId || (cuentasBancarias[0] ? cuentasBancarias[0].id : null),
-      metodo: ctaObj ? `Cuenta: ${ctaObj.nombre}` : 'Cuenta Líquida'
+      moneda: monedaRecurrenteForm,
+      cuentaId: ctaId,
+      metodo: ctaObj ? ctaObj.nombre : 'Cuenta Básica',
+      ultimoMesRegistrado: null
     };
 
-    setRecurrentes(prev => [...prev, nuevo]);
-    setMontoRecurrenteForm('');
-    setDescRecurrenteForm('');
+    setRecurrentes(prev => [...prev, nuevoRec]);
     setMostrarModalRecurrente(false);
-  };
-
-  const procesarRecurrente = (rec) => {
-    const hoyStr = new Date().toISOString().split('T')[0];
-    const nuevaTrans = {
-      id: Date.now().toString(),
-      tipo: rec.tipo,
-      monto: rec.monto,
-      moneda: rec.moneda,
-      categoria: rec.categoria,
-      esCredito: false,
-      cuentaId: rec.cuentaId,
-      metodo: rec.metodo,
-      fecha: hoyStr,
-      descripcion: `[Recurrente] ${rec.descripcion}`,
-      createdAt: new Date().toISOString()
-    };
-
-    setTransacciones(prev => [nuevaTrans, ...prev]);
   };
 
   const eliminarRecurrente = (id) => {
     setRecurrentes(prev => prev.filter(r => r.id !== id));
   };
 
-  const registrarAbonoPrestamo = (e) => {
-    e.preventDefault();
-    if (!user || !montoAbonoPrestamo || !prestamoSeleccionadoId || !cuentaOrigenAbonoPrestamoId || Number(montoAbonoPrestamo) <= 0) return;
+  const procesarRecurrente = (rec) => {
+    const claveMesAnio = `${anioSeleccionado}-${String(mesSeleccionado + 1).padStart(2, '0')}`;
+    if (rec.ultimoMesRegistrado === claveMesAnio) return;
 
-    const montoNum = parseFloat(montoAbonoPrestamo);
-    const prestamoObj = prestamos.find(p => p.id === prestamoSeleccionadoId);
-    const ctaObj = cuentasBancarias.find(c => c.id === cuentaOrigenAbonoPrestamoId);
-    if (!prestamoObj || !ctaObj) return;
-
-    const esPagoDeDeuda = prestamoObj.tipo === 'tomado';
+    const numDiasEnMes = new Date(anioSeleccionado, mesSeleccionado + 1, 0).getDate();
+    const diaValido = Math.min(rec.diaPago || 1, numDiasEnMes);
+    const fechaProgramada = `${anioSeleccionado}-${String(mesSeleccionado + 1).padStart(2, '0')}-${String(diaValido).padStart(2, '0')}`;
 
     const nuevaTrans = {
-      id: Date.now().toString(),
-      tipo: esPagoDeDeuda ? 'pago_prestamo' : 'ingreso',
-      monto: montoNum,
-      moneda: monedaAbonoForm,
-      categoria: 'Pago de Préstamo',
+      id: `trans_rec_${Date.now()}`,
+      tipo: rec.tipo,
+      monto: rec.monto,
+      descripcion: rec.descripcion,
+      categoria: rec.categoria,
+      fecha: fechaProgramada,
+      moneda: rec.moneda || 'PEN',
       esCredito: false,
-      cuentaId: ctaObj.id,
-      metodo: `Cuenta: ${ctaObj.nombre}`,
-      fecha: new Date().toISOString().split('T')[0],
-      descripcion: esPagoDeDeuda 
-        ? `Pago líquido cuota préstamo: ${prestamoObj.nombre} desde ${ctaObj.nombre}` 
-        : `Cobro líquido de préstamo: ${prestamoObj.nombre} a ${ctaObj.nombre}`,
-      createdAt: new Date().toISOString()
+      cuentaId: rec.cuentaId,
+      metodo: rec.metodo || 'Cuenta'
     };
 
     setTransacciones(prev => [nuevaTrans, ...prev]);
-
-    setPrestamos(prev => prev.map(p => {
-      if (p.id === prestamoSeleccionadoId) {
-        const montoEnMonedaPrestamo = convertirMoneda(montoNum, monedaAbonoForm, p.moneda || 'PEN');
-        return { ...p, montoPendiente: Math.max(0, (p.montoPendiente || 0) - montoEnMonedaPrestamo) };
-      }
-      return p;
-    }));
-
-    setMontoAbonoPrestamo('');
-    setMostrarModalAbonoPrestamo(false);
+    setRecurrentes(prev => prev.map(r => r.id === rec.id ? { ...r, ultimoMesRegistrado: claveMesAnio } : r));
   };
 
-  const eliminarPrestamo = (id) => {
-    setPrestamos(prev => prev.filter(p => p.id !== id));
+  // Metas Handlers
+  const agregarMeta = (e) => {
+    e.preventDefault();
+    const obj = parseFloat(objetivoMetaForm);
+    if (!obj || obj <= 0 || !nombreMetaForm.trim()) return;
+
+    const nuevaMeta = {
+      id: `meta_${Date.now()}`,
+      nombre: nombreMetaForm.trim(),
+      objetivo: obj,
+      actual: parseFloat(actualMetaForm) || 0,
+      fechaLimite: fechaLimiteMetaForm || null
+    };
+
+    setMetas(prev => [...prev, nuevaMeta]);
+    setMostrarModalMeta(false);
   };
 
-  const abrirNuevaTransaccion = () => {
-    if (transaccionEditandoId) {
-      setTransaccionEditandoId(null);
-      setTipoForm('gasto');
-      setCategoriaForm(CATEGORIAS_GASTOS[0]);
-      setEsCreditoForm(false);
-      setMonedaTransForm('PEN');
-      setMontoForm('');
-      setDescForm('');
-      setFechaForm(new Date().toISOString().split('T')[0]);
-    }
-    if (cuentasBancarias.length > 0 && !cuentaSeleccionadaId) {
-      setCuentaSeleccionadaId(cuentasBancarias[0].id);
-    }
-    setMostrarModalTransaccion(true);
-  };
-
-  const abrirEdicionTransaccion = (t) => {
-    setTransaccionEditandoId(t.id);
-    setTipoForm(t.tipo);
-    setMontoForm(String(t.monto));
-    setMonedaTransForm(t.moneda || 'PEN');
-    setDescForm(t.descripcion || '');
-    setCategoriaForm(t.categoria);
-    setFechaForm(t.fecha);
-    setEsCreditoForm(!!t.esCredito);
-    if (t.esCredito && t.tarjetaId) setTarjetaSeleccionadaId(t.tarjetaId);
-    if (!t.esCredito && t.cuentaId) setCuentaSeleccionadaId(t.cuentaId);
-    setMostrarModalTransaccion(true);
-  };
-
-  const descargarArchivo = (contenido, nombre, tipoMime) => {
-    const blob = new Blob([contenido], { type: tipoMime });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = nombre;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  };
-
+  // Respaldo JSON / CSV
   const exportarRespaldo = () => {
-    const respaldo = {
-      app: 'gestor-finanzas',
-      version: 3,
-      exportadoEn: new Date().toISOString(),
-      moneda,
-      tiposCambio,
-      darkMode,
+    const data = {
       transacciones,
       cuentasBancarias,
       tarjetas,
       prestamos,
-      metas,
       presupuestos,
-      recurrentes
+      recurrentes,
+      metas,
+      moneda,
+      tiposCambio
     };
-    const hoy = new Date().toISOString().split('T')[0];
-    descargarArchivo(JSON.stringify(respaldo, null, 2), `finanzas-respaldo-${hoy}.json`, 'application/json');
-    setMensajeRespaldo({ tipo: 'ok', texto: 'Copia de respaldo descargada.' });
-  };
-
-  const exportarCSV = () => {
-    const esc = (v) => {
-      let txt = String(v ?? '');
-      if (/^[=+\-@\t\r]/.test(txt)) txt = "'" + txt;
-      return '"' + txt.replace(/"/g, '""') + '"';
-    };
-    const filas = [['Fecha', 'Tipo', 'Categoría', 'Concepto', 'Método / Cuenta', 'Moneda', 'Monto']];
-    [...transacciones]
-      .sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)))
-      .forEach(t => {
-        filas.push([t.fecha, t.tipo, t.categoria, t.descripcion, t.metodo, t.moneda || 'PEN', Number(t.monto || 0).toFixed(2)]);
-      });
-    const csv = '\uFEFF' + filas.map(f => f.map(esc).join(',')).join('\r\n');
-    const hoy = new Date().toISOString().split('T')[0];
-    descargarArchivo(csv, `finanzas-movimientos-${hoy}.csv`, 'text/csv;charset=utf-8');
-    setMensajeRespaldo({ tipo: 'ok', texto: `Se exportaron ${transacciones.length} movimientos.` });
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `respaldo_finanzas_${user.username}_${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
   };
 
   const importarRespaldo = (e) => {
-    const archivo = e.target.files && e.target.files[0];
-    e.target.value = '';
-    if (!archivo) return;
+    const file = e.target.files[0];
+    if (!file) return;
 
-    const lector = new FileReader();
-    lector.onload = () => {
+    const reader = new FileReader();
+    reader.onload = (event) => {
       try {
-        const datos = JSON.parse(String(lector.result));
-        if (!datos || datos.app !== 'gestor-finanzas' || !Array.isArray(datos.transacciones)) {
-          throw new Error('formato');
-        }
-        const lista = (v) => (Array.isArray(v) ? v.filter(x => x && typeof x === 'object' && x.id != null) : []);
-        const nuevasTrans = lista(datos.transacciones);
-        const confirmar = window.confirm(
-          `Se reemplazarán tus datos actuales por la copia de respaldo (${nuevasTrans.length} transacciones). ¿Continuar?`
-        );
-        if (!confirmar) return;
-
-        setTransacciones(nuevasTrans);
-        if (Array.isArray(datos.cuentasBancarias)) setCuentasBancarias(lista(datos.cuentasBancarias));
-        setTarjetas(lista(datos.tarjetas));
-        setPrestamos(lista(datos.prestamos));
-        setMetas(lista(datos.metas));
-        if (datos.presupuestos && typeof datos.presupuestos === 'object') setPresupuestos(datos.presupuestos);
-        if (Array.isArray(datos.recurrentes)) setRecurrentes(lista(datos.recurrentes));
-        if (['PEN', 'USD', 'EUR'].includes(datos.moneda)) setMoneda(datos.moneda);
-        if (datos.tiposCambio && Number(datos.tiposCambio.USD_PEN) > 0 && Number(datos.tiposCambio.EUR_PEN) > 0) {
-          setTiposCambio({
-            USD_PEN: Number(datos.tiposCambio.USD_PEN),
-            EUR_PEN: Number(datos.tiposCambio.EUR_PEN)
-          });
-        }
-        if (typeof datos.darkMode === 'boolean') setDarkMode(datos.darkMode);
-        setMensajeRespaldo({ tipo: 'ok', texto: 'Copia restaurada correctamente.' });
+        const imported = JSON.parse(event.target.result);
+        if (imported.transacciones) setTransacciones(imported.transacciones);
+        if (imported.cuentasBancarias) setCuentasBancarias(imported.cuentasBancarias);
+        if (imported.tarjetas) setTarjetas(imported.tarjetas);
+        if (imported.prestamos) setPrestamos(imported.prestamos);
+        if (imported.presupuestos) setPresupuestos(imported.presupuestos);
+        if (imported.recurrentes) setRecurrentes(imported.recurrentes);
+        if (imported.metas) setMetas(imported.metas);
+        setMensajeRespaldo({ tipo: 'ok', texto: '¡Respaldo importado con éxito!' });
       } catch (err) {
-        setMensajeRespaldo({
-          tipo: 'error',
-          texto: 'No se pudo leer el archivo. Usa una copia descargada desde esta app (.json).'
-        });
+        setMensajeRespaldo({ tipo: 'error', texto: 'Archivo de respaldo no válido.' });
       }
     };
-    lector.readAsText(archivo);
+    reader.readAsText(file);
   };
 
-  const eliminarTransaccion = (t) => {
-    setTransacciones(prev => prev.filter(item => item.id !== t.id));
-
-    if (t.tipo === 'gasto' && t.esCredito && t.tarjetaId) {
-      setTarjetas(prev => prev.map(tar => {
-        if (tar.id === t.tarjetaId) {
-          const montoEnTarjeta = convertirMoneda(Number(t.monto), t.moneda || 'PEN', tar.moneda || 'PEN');
-          return { ...tar, deudaActual: Math.max(0, (tar.deudaActual || 0) - montoEnTarjeta) };
-        }
-        return tar;
-      }));
-    }
-  };
-
-  const agregarMeta = (e) => {
-    e.preventDefault();
-    if (!user || !nombreMetaForm || !objetivoMetaForm) return;
-
-    const nuevaMeta = {
-      id: Date.now().toString(),
-      nombre: nombreMetaForm,
-      objetivo: parseFloat(objetivoMetaForm),
-      actual: parseFloat(actualMetaForm) || 0,
-      fechaLimite: fechaLimiteMetaForm || 'Sin fecha',
-      createdAt: new Date().toISOString()
-    };
-
-    setMetas(prev => [...prev, nuevaMeta]);
-    setNombreMetaForm('');
-    setObjetivoMetaForm('');
-    setActualMetaForm('');
-    setFechaLimiteMetaForm('');
-    setMostrarModalMeta(false);
-  };
-
-  const actualizarProgresoMeta = (id, actualActual, delta) => {
-    setMetas(prev => prev.map(m => {
-      if (m.id === id) {
-        return { ...m, actual: Math.max(0, (m.actual || 0) + delta) };
-      }
-      return m;
-    }));
-  };
-
-  const eliminarMeta = (id) => {
-    setMetas(prev => prev.filter(m => m.id !== id));
+  const exportarCSV = () => {
+    let csv = 'Fecha,Tipo,Concepto,Categoria,Metodo/Cuenta,Monto,Moneda\n';
+    transacciones.forEach(t => {
+      csv += `"${t.fecha}","${t.tipo}","${t.descripcion}","${t.categoria}","${t.metodo}",${t.monto},"${t.moneda || 'PEN'}"\n`;
+    });
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `movimientos_${user.username}_${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
   };
 
   if (!user) {
@@ -1306,16 +1126,62 @@ export default function App() {
               </div>
             </div>
 
+            {modoAuth === 'register' && (
+              <>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Pregunta de Seguridad</label>
+                  <select
+                    value={preguntaForm}
+                    onChange={(e) => setPreguntaForm(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800"
+                  >
+                    <option value="¿Cuál es el nombre de tu primera mascota?">¿Cuál es el nombre de tu primera mascota?</option>
+                    <option value="¿En qué ciudad naciste?">¿En qué ciudad naciste?</option>
+                    <option value="¿Cuál es tu comida favorita?">¿Cuál es tu comida favorita?</option>
+                    <option value="¿Nombre de tu colegio de primaria?">¿Nombre de tu colegio de primaria?</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Respuesta Secreta</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Tu respuesta para recuperar cuenta..."
+                    value={respuestaForm}
+                    onChange={(e) => setRespuestaForm(e.target.value)}
+                    className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800"
+                  />
+                </div>
+              </>
+            )}
+
+            {modoAuth === 'login' && (
+              <div className="text-right">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMensajeRecuperacion(null);
+                    setPasoRecuperacion(1);
+                    setMostrarModalRecuperar(true);
+                  }}
+                  className="text-xs text-indigo-600 hover:text-indigo-700 font-semibold"
+                >
+                  ¿Olvidaste tu contraseña?
+                </button>
+              </div>
+            )}
+
             <button
               type="submit"
               disabled={procesandoAuth}
-              className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-semibold rounded-xl text-sm shadow-md transition-all flex items-center justify-center gap-2"
+              className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-sm shadow-md hover:shadow-lg transition-all disabled:opacity-50"
             >
-              {procesandoAuth ? 'Procesando...' : (modoAuth === 'login' ? 'Entrar a la App' : 'Registrar Cuenta')}
+              {procesandoAuth ? 'Procesando...' : modoAuth === 'login' ? 'Ingresar a la App' : 'Registrar Cuenta'}
             </button>
           </form>
 
-          <div className="text-center pt-2">
+          <div className="text-center pt-2 border-t border-slate-100 flex flex-col gap-2">
             <button
               type="button"
               onClick={() => {
@@ -1326,7 +1192,172 @@ export default function App() {
             >
               {modoAuth === 'login' ? '¿No tienes cuenta? Regístrate aquí' : '¿Ya tienes cuenta? Inicia sesión'}
             </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setConfirmarTextoBorrar('');
+                setMostrarModalBorrarCache(true);
+              }}
+              className="text-[11px] font-semibold text-rose-500 hover:text-rose-600 flex items-center justify-center gap-1 mt-1 transition-colors"
+            >
+              <Trash2 className="w-3.5 h-3.5" /> Borrar caché y datos guardados de la app
+            </button>
           </div>
+
+          {/* MODAL ADVERTENCIA BORRAR CACHÉ / DATOS */}
+          {mostrarModalBorrarCache && (
+            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+              <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 space-y-4 text-slate-800">
+                <div className="flex items-center gap-3 text-rose-600 border-b border-rose-100 pb-3">
+                  <div className="p-2 bg-rose-100 rounded-xl">
+                    <AlertTriangle className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-base text-slate-900">¿Limpiar caché y datos?</h3>
+                    <p className="text-[11px] text-rose-600 font-semibold">Esta acción es irreversible</p>
+                  </div>
+                </div>
+
+                <div className="space-y-2 text-xs text-slate-600">
+                  <p>
+                    Se eliminarán <strong>todos los usuarios registrados</strong>, sus transacciones, tarjetas, préstamos y configuraciones almacenadas únicamente en esta página web.
+                  </p>
+                  <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 text-[11px]">
+                    <strong>Nota:</strong> Solo se afectarán los datos locales guardados para este sitio web.
+                  </div>
+                </div>
+
+                <div className="space-y-3 pt-1">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      Escribe <span className="text-rose-600 font-extrabold uppercase">BORRAR</span> para confirmar:
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="BORRAR"
+                      value={confirmarTextoBorrar}
+                      onChange={(e) => setConfirmarTextoBorrar(e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs font-mono font-bold uppercase focus:outline-none focus:ring-2 focus:ring-rose-500"
+                    />
+                  </div>
+
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setMostrarModalBorrarCache(false)}
+                      className="flex-1 py-2 border border-slate-200 text-slate-600 rounded-xl text-xs font-semibold hover:bg-slate-50 transition-colors"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="button"
+                      disabled={confirmarTextoBorrar.trim().toUpperCase() !== 'BORRAR'}
+                      onClick={handleBorrarCachePagina}
+                      className="flex-1 py-2 bg-rose-600 text-white font-semibold rounded-xl text-xs hover:bg-rose-700 disabled:opacity-40 shadow-sm transition-all"
+                    >
+                      Sí, Borrar Todo
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* MODAL RECUPERAR CONTRASEÑA */}
+          {mostrarModalRecuperar && (
+            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+              <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 space-y-4 text-slate-800">
+                <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+                  <h3 className="font-bold text-base text-slate-900 flex items-center gap-2">
+                    <ShieldCheck className="w-5 h-5 text-indigo-600" />
+                    Recuperar Contraseña
+                  </h3>
+                  <button
+                    onClick={() => setMostrarModalRecuperar(false)}
+                    className="text-slate-400 hover:text-slate-600 text-sm font-bold"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                {mensajeRecuperacion && (
+                  <div className={`p-3 rounded-xl text-xs font-medium ${mensajeRecuperacion.tipo === 'ok' ? 'bg-emerald-50 text-emerald-600 border border-emerald-200' : 'bg-rose-50 text-rose-600 border border-rose-200'}`}>
+                    {mensajeRecuperacion.texto}
+                  </div>
+                )}
+
+                {pasoRecuperacion === 1 ? (
+                  <form onSubmit={handleBuscarUsuarioRecuperacion} className="space-y-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1">Nombre de Usuario</label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="Ej: juanperez"
+                        value={userRecuperar}
+                        onChange={(e) => setUserRecuperar(e.target.value)}
+                        className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+                    <button
+                      type="submit"
+                      className="w-full py-2.5 bg-indigo-600 text-white font-semibold rounded-xl text-xs hover:bg-indigo-700 shadow-sm"
+                    >
+                      Continuar
+                    </button>
+                  </form>
+                ) : (
+                  <form onSubmit={handleRestablecerPassword} className="space-y-4">
+                    <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl">
+                      <span className="block text-[11px] font-bold text-slate-500 uppercase">Pregunta de Seguridad:</span>
+                      <p className="text-xs font-semibold text-slate-800 mt-0.5">{preguntaUsuario}</p>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1">Tu Respuesta Secreta</label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="Respuesta..."
+                        value={respuestaRecuperar}
+                        onChange={(e) => setRespuestaRecuperar(e.target.value)}
+                        className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1">Nueva Contraseña</label>
+                      <input
+                        type="password"
+                        required
+                        placeholder="••••••••"
+                        value={nuevaPasswordForm}
+                        onChange={(e) => setNuevaPasswordForm(e.target.value)}
+                        className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setPasoRecuperacion(1)}
+                        className="flex-1 py-2 border border-slate-200 text-slate-600 rounded-xl text-xs font-semibold hover:bg-slate-50"
+                      >
+                        Atrás
+                      </button>
+                      <button
+                        type="submit"
+                        className="flex-1 py-2 bg-indigo-600 text-white rounded-xl text-xs font-semibold hover:bg-indigo-700 shadow-sm"
+                      >
+                        Guardar
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -1457,7 +1488,7 @@ export default function App() {
               onClick={() => {
                 setCuentaEditandoId(null);
                 setNombreCuentaForm('');
-                setSaldoInicialCuentaForm('');
+                setSaldoInicialCuentaForm('0');
                 setTipoCuentaForm('Bancaria');
                 setMonedaCuentaForm('PEN');
                 setColorCuentaForm('#6366F1');
@@ -1581,7 +1612,7 @@ export default function App() {
                   onClick={() => {
                     setCuentaEditandoId(null);
                     setNombreCuentaForm('');
-                    setSaldoInicialCuentaForm('');
+                    setSaldoInicialCuentaForm('0');
                     setTipoCuentaForm('Bancaria');
                     setMonedaCuentaForm('PEN');
                     setColorCuentaForm('#6366F1');
@@ -1706,7 +1737,6 @@ export default function App() {
                   const sobregirada = porcentajeUso > 100;
                   const precaucion = porcentajeUso >= 50 && porcentajeUso <= 100;
                   const cuidado = porcentajeUso >= 25 && porcentajeUso < 50;
-                  const excelente = porcentajeUso < 25;
 
                   return (
                     <div key={t.id} className={`p-5 rounded-2xl relative group shadow-sm border ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
@@ -1959,7 +1989,7 @@ export default function App() {
                 <Repeat className="w-5 h-5 text-purple-500" />
                 Movimientos Recurrentes (Alquileres, Suscripciones, etc.)
               </h3>
-              <p className="text-xs text-slate-400">Registra gastos o ingresos fijos mensuales con un solo clic cada mes.</p>
+              <p className="text-xs text-slate-400">Registra gastos o ingresos fijos del mes correspondiente con la fecha programada.</p>
             </div>
             <button
               onClick={() => {
@@ -1976,220 +2006,47 @@ export default function App() {
             <p className="text-slate-400 text-sm">No tienes movimientos recurrentes guardados.</p>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {recurrentes.map(rec => (
-                <div key={rec.id} className={`p-4 rounded-xl border relative group flex flex-col justify-between ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
-                  <button
-                    onClick={() => eliminarRecurrente(rec.id)}
-                    className="absolute top-3 right-3 text-slate-400 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-opacity"
-                    title="Eliminar recurrencia"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+              {recurrentes.map(rec => {
+                const claveMesAnio = `${anioSeleccionado}-${String(mesSeleccionado + 1).padStart(2, '0')}`;
+                const yaRegistradoEsteMes = rec.ultimoMesRegistrado === claveMesAnio;
 
-                  <div>
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${rec.tipo === 'ingreso' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
-                        {rec.tipo}
-                      </span>
-                      <span className="text-[10px] bg-slate-700 text-slate-200 px-2 py-0.5 rounded">Día {rec.diaPago}</span>
-                    </div>
-                    <h4 className={`font-bold text-sm mb-1 ${darkMode ? 'text-slate-100' : 'text-slate-800'}`}>{rec.descripcion}</h4>
-                    <p className="text-xs text-slate-400 mb-3">Categoría: {rec.categoria}</p>
-                  </div>
-
-                  <div className="flex items-center justify-between pt-2 border-t border-slate-700/50">
-                    <span className={`font-bold text-base ${rec.tipo === 'ingreso' ? 'text-emerald-500' : 'text-rose-500'}`}>
-                      {formatoMoneda(rec.monto, rec.moneda || 'PEN')}
-                    </span>
-                    <button
-                      onClick={() => procesarRecurrente(rec)}
-                      className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs font-semibold shadow-sm transition-colors flex items-center gap-1"
-                    >
-                      <CheckCircle2 className="w-3.5 h-3.5" /> Registrar ahora
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-
-        {/* GRÁFICOS */}
-        <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className={`p-6 rounded-2xl shadow-sm border ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100'}`}>
-            <h3 className={`text-lg font-bold mb-4 flex items-center gap-2 ${darkMode ? 'text-slate-100' : 'text-slate-800'}`}>
-              <PieChartIcon className="w-5 h-5 text-indigo-500" />
-              Gastos por Categoría ({moneda}) - {NOMBRES_MESES[mesSeleccionado]}
-            </h3>
-            {datosGastosPorCategoria.length > 0 ? (
-              <div className="h-64 sm:h-72">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={datosGastosPorCategoria}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={60}
-                      outerRadius={90}
-                      paddingAngle={5}
-                      dataKey="value"
-                    >
-                      {datosGastosPorCategoria.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={COLORES_CATEGORIAS[index % COLORES_CATEGORIAS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip formatter={(value) => [formatoMoneda(Number(value), moneda), 'Monto']} />
-                    <Legend />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-            ) : (
-              <div className="h-64 flex items-center justify-center text-slate-400 text-sm">
-                No hay registro de gastos en {NOMBRES_MESES[mesSeleccionado]} {anioSeleccionado}.
-              </div>
-            )}
-          </div>
-
-          <div className={`p-6 rounded-2xl shadow-sm border ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100'}`}>
-            <h3 className={`text-lg font-bold mb-4 flex items-center gap-2 ${darkMode ? 'text-slate-100' : 'text-slate-800'}`}>
-              <TrendingUp className="w-5 h-5 text-emerald-500" />
-              Comparativa General ({moneda})
-            </h3>
-            <div className="h-64 sm:h-72">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={datosComparativos}>
-                  <XAxis dataKey="nombre" stroke={darkMode ? '#94a3b8' : '#64748b'} />
-                  <YAxis stroke={darkMode ? '#94a3b8' : '#64748b'} />
-                  <Tooltip formatter={(value) => [formatoMoneda(Number(value), moneda), '']} />
-                  <Legend />
-                  <Bar dataKey="Ingresos" fill="#10B981" radius={[6, 6, 0, 0]} />
-                  <Bar dataKey="Gastos Líquidos" fill="#EF4444" radius={[6, 6, 0, 0]} />
-                  <Bar dataKey="Gastos Crédito" fill="#8B5CF6" radius={[6, 6, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-        </section>
-
-        {/* VISTA ANUAL COMPLETA Y TENDENCIA PATRIMONIAL */}
-        <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className={`p-6 rounded-2xl shadow-sm border ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100'}`}>
-            <div className="flex justify-between items-center mb-4">
-              <div>
-                <h3 className={`text-lg font-bold flex items-center gap-2 ${darkMode ? 'text-slate-100' : 'text-slate-800'}`}>
-                  <BarChart3 className="w-5 h-5 text-indigo-500" />
-                  Resumen Anual Mes a Mes ({anioSeleccionado})
-                </h3>
-                <p className="text-xs text-slate-400">Audita tus ingresos y gastos globales a lo largo de todo el año.</p>
-              </div>
-            </div>
-
-            <div className="h-72 sm:h-80">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={datosAnuales}>
-                  <XAxis dataKey="mes" stroke={darkMode ? '#94a3b8' : '#64748b'} />
-                  <YAxis stroke={darkMode ? '#94a3b8' : '#64748b'} />
-                  <Tooltip formatter={(value) => [formatoMoneda(Number(value), moneda), '']} />
-                  <Legend />
-                  <Bar dataKey="Ingresos" fill="#10B981" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="Gastos" fill="#EF4444" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-
-          <div className={`p-6 rounded-2xl shadow-sm border ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100'}`}>
-            <div className="flex justify-between items-center mb-4">
-              <div>
-                <h3 className={`text-lg font-bold flex items-center gap-2 ${darkMode ? 'text-slate-100' : 'text-slate-800'}`}>
-                  <TrendingUp className="w-5 h-5 text-emerald-500" />
-                  Evolución Histórica del Patrimonio Neto ({anioSeleccionado})
-                </h3>
-                <p className="text-xs text-slate-400">Evolución del balance real: Fondos líquidos acumulados menos pasivos totales (tarjetas y préstamos).</p>
-              </div>
-            </div>
-
-            <div className="h-72 sm:h-80">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={tendenciaPatrimonioHistorico}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={darkMode ? '#334155' : '#e2e8f0'} />
-                  <XAxis dataKey="mes" stroke={darkMode ? '#94a3b8' : '#64748b'} />
-                  <YAxis stroke={darkMode ? '#94a3b8' : '#64748b'} />
-                  <Tooltip formatter={(value) => [formatoMoneda(Number(value), moneda), '']} />
-                  <Legend />
-                  <Line type="monotone" dataKey="Patrimonio Neto" stroke="#6366F1" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 7 }} />
-                  <Line type="monotone" dataKey="Liquidez" stroke="#10B981" strokeWidth={2} strokeDasharray="4 4" />
-                  <Line type="monotone" dataKey="Deuda Total" stroke="#EF4444" strokeWidth={2} strokeDasharray="4 4" />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-        </section>
-
-        {/* METAS DE AHORRO GLOBALES */}
-        <section className={`p-6 rounded-2xl shadow-sm border ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100'}`}>
-          <div className="flex justify-between items-center mb-4">
-            <div>
-              <h3 className={`text-lg font-bold flex items-center gap-2 ${darkMode ? 'text-slate-100' : 'text-slate-800'}`}>
-                <PiggyBank className="w-5 h-5 text-emerald-500" />
-                Metas de Ahorro
-              </h3>
-              <p className="text-xs text-slate-400">Tus ahorros acumulados permanecen continuos sin importar el mes.</p>
-            </div>
-            <button 
-              onClick={() => setMostrarModalMeta(true)}
-              className="text-sm font-semibold text-emerald-500 hover:text-emerald-400 flex items-center gap-1"
-            >
-              <Plus className="w-4 h-4" /> Agregar Meta
-            </button>
-          </div>
-
-          {metas.length === 0 ? (
-            <p className="text-slate-400 text-sm py-2">No tienes metas fijadas actualmente.</p>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {metas.map(meta => {
-                const porcentaje = Math.min(100, Math.round(((meta.actual || 0) / (meta.objetivo || 1)) * 100));
                 return (
-                  <div key={meta.id} className={`p-4 rounded-xl border relative group ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
-                    <button 
-                      onClick={() => eliminarMeta(meta.id)}
+                  <div key={rec.id} className={`p-4 rounded-xl border relative group flex flex-col justify-between ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                    <button
+                      onClick={() => eliminarRecurrente(rec.id)}
                       className="absolute top-3 right-3 text-slate-400 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-opacity"
-                      title="Eliminar meta"
+                      title="Eliminar recurrencia"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
-                    <h4 className={`font-semibold pr-6 ${darkMode ? 'text-slate-100' : 'text-slate-800'}`}>{meta.nombre}</h4>
-                    <p className="text-xs text-slate-400 mb-2">Límite: {meta.fechaLimite}</p>
-                    
-                    <div className="flex justify-between text-sm font-medium mb-1">
-                      <span className={darkMode ? 'text-slate-200' : 'text-slate-700'}>{formatoMoneda(meta.actual, moneda)}</span>
-                      <span className="text-slate-400">{formatoMoneda(meta.objetivo, moneda)}</span>
-                    </div>
 
-                    <div className={`w-full h-2.5 rounded-full overflow-hidden mb-3 ${darkMode ? 'bg-slate-700' : 'bg-slate-200'}`}>
-                      <div 
-                        className={`h-full transition-all duration-300 ${porcentaje >= 100 ? 'bg-emerald-500' : 'bg-indigo-600'}`}
-                        style={{ width: `${porcentaje}%` }}
-                      ></div>
-                    </div>
-
-                    <div className="flex justify-between items-center text-xs">
-                      <span className="font-bold text-indigo-400">{porcentaje}% alcanzado</span>
-                      <div className="flex gap-1">
-                        <button 
-                          onClick={() => actualizarProgresoMeta(meta.id, meta.actual || 0, 50)}
-                          className={`px-2 py-1 border rounded font-medium shadow-sm ${darkMode ? 'bg-slate-700 border-slate-600 text-slate-200 hover:bg-slate-600' : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100'}`}
-                        >
-                          +50
-                        </button>
-                        <button 
-                          onClick={() => actualizarProgresoMeta(meta.id, meta.actual || 0, 100)}
-                          className={`px-2 py-1 border rounded font-medium shadow-sm ${darkMode ? 'bg-slate-700 border-slate-600 text-slate-200 hover:bg-slate-600' : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100'}`}
-                        >
-                          +100
-                        </button>
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${rec.tipo === 'ingreso' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
+                          {rec.tipo}
+                        </span>
+                        <span className="text-[10px] bg-slate-700 text-slate-200 px-2 py-0.5 rounded">Día {rec.diaPago}</span>
                       </div>
+                      <h4 className={`font-bold text-sm mb-1 ${darkMode ? 'text-slate-100' : 'text-slate-800'}`}>{rec.descripcion}</h4>
+                      <p className="text-xs text-slate-400 mb-3">Categoría: {rec.categoria}</p>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-2 border-t border-slate-700/50">
+                      <span className={`font-bold text-base ${rec.tipo === 'ingreso' ? 'text-emerald-500' : 'text-rose-500'}`}>
+                        {formatoMoneda(rec.monto, rec.moneda || 'PEN')}
+                      </span>
+                      <button
+                        onClick={() => procesarRecurrente(rec)}
+                        disabled={yaRegistradoEsteMes}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold shadow-sm transition-colors flex items-center gap-1 ${
+                          yaRegistradoEsteMes 
+                            ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 cursor-not-allowed' 
+                            : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                        }`}
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        {yaRegistradoEsteMes ? '✓ Registrado este mes' : 'Registrar ahora'}
+                      </button>
                     </div>
                   </div>
                 );
