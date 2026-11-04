@@ -1,7 +1,8 @@
 # Gestor de Finanzas
 
 Aplicación web de finanzas personales multi-moneda (PEN, USD, EUR) con React, TypeScript, Tailwind y Recharts.
-Los datos se guardan en el navegador de cada persona (localStorage).
+Los datos se guardan en el navegador de cada persona (localStorage). Actualmente solo cuenta con Soporte en Perú
+Pagina Web: https://cronigame97.github.io/finanzaspersonales.github.io/
 
 ## Publicar en GitHub Pages
 
