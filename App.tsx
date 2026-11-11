@@ -537,9 +537,19 @@ export default function App() {
   }, [cuentasBancarias, transacciones, tiposCambio]);
 
   const saldoLiquidoTotal = useMemo(() => {
-    return cuentasConSaldosActuales.reduce((acc, cta) => {
-      return acc + convertirMoneda(cta.saldoActual, cta.moneda || 'PEN', moneda);
-    }, 0);
+    // Evitamos duplicar cuentas vinculadas al sumar únicamente las cuentas principales o aquellas que no tienen vinculación activa duplicada
+    const idsProcesados = new Set();
+    let total = 0;
+
+    cuentasConSaldosActuales.forEach(cta => {
+      const idAContabilizar = cta.cuentaVinculadaId || cta.id;
+      if (!idsProcesados.has(idAContabilizar)) {
+        idsProcesados.add(idAContabilizar);
+        total += convertirMoneda(cta.saldoActual, cta.moneda || 'PEN', moneda);
+      }
+    });
+
+    return total;
   }, [cuentasConSaldosActuales, moneda, tiposCambio]);
 
   // Resumen del Mes Seleccionado
