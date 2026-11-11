@@ -271,6 +271,7 @@ export default function App() {
   const [tarjetaEditandoId, setTarjetaEditandoId] = useState(null);
   const [nombreTarjetaForm, setNombreTarjetaForm] = useState('');
   const [limiteTarjetaForm, setLimiteTarjetaForm] = useState('');
+  const [diaCorteTarjetaForm, setDiaCorteTarjetaForm] = useState('');
   const [diaVencimientoTarjetaForm, setDiaVencimientoTarjetaForm] = useState('');
   const [deudaInicialTarjetaForm, setDeudaInicialTarjetaForm] = useState('');
   const [monedaTarjetaForm, setMonedaTarjetaForm] = useState('PEN');
@@ -1042,6 +1043,7 @@ export default function App() {
       id: tarjetaEditandoId || `tarj_${Date.now()}`,
       nombre: nombreTarjetaForm.trim(),
       limite: parseFloat(limiteTarjetaForm),
+      diaCorte: diaCorteTarjetaForm ? parseInt(diaCorteTarjetaForm, 10) : null,
       diaVencimiento: diaVencimientoTarjetaForm ? parseInt(diaVencimientoTarjetaForm, 10) : null,
       moneda: monedaTarjetaForm
     };
@@ -2153,7 +2155,7 @@ export default function App() {
                   <CreditCard className="w-5 h-5 text-purple-500" />
                   Tarjetas de Crédito y Compras en Cuotas ({tarjetas.length})
                 </h3>
-                <p className="text-xs text-slate-400">Controla tus líneas de crédito, fechas de pago y tus consumos fraccionados en cuotas mensuales.</p>
+                <p className="text-xs text-slate-400">Controla tus líneas de crédito, fecha de corte, fecha de pago y tus consumos fraccionados.</p>
               </div>
 
               <div className="flex flex-wrap gap-2 w-full sm:w-auto">
@@ -2189,6 +2191,7 @@ export default function App() {
                     setTarjetaEditandoId(null);
                     setNombreTarjetaForm('');
                     setLimiteTarjetaForm('');
+                    setDiaCorteTarjetaForm('');
                     setDiaVencimientoTarjetaForm('');
                     setDeudaInicialTarjetaForm('');
                     setMonedaTarjetaForm('PEN');
@@ -2220,6 +2223,7 @@ export default function App() {
                             setTarjetaEditandoId(t.id);
                             setNombreTarjetaForm(t.nombre);
                             setLimiteTarjetaForm(String(t.limite));
+                            setDiaCorteTarjetaForm(t.diaCorte ? String(t.diaCorte) : '');
                             setDiaVencimientoTarjetaForm(t.diaVencimiento ? String(t.diaVencimiento) : '');
                             setMonedaTarjetaForm(t.moneda || 'PEN');
                             setDeudaInicialTarjetaForm(String(t.deudaActual || 0));
@@ -2239,13 +2243,18 @@ export default function App() {
                         </button>
                       </div>
 
-                      <div className="flex items-center gap-2 mb-2">
+                      <div className="flex items-center gap-2 mb-2 flex-wrap">
                         <span className="text-[10px] bg-purple-500/20 text-purple-300 border border-purple-500/30 px-2 py-0.5 rounded-full font-bold">
                           {t.moneda || 'PEN'}
                         </span>
+                        {t.diaCorte && (
+                          <span className="text-[10px] bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded">
+                            Corte: Día {t.diaCorte}
+                          </span>
+                        )}
                         {t.diaVencimiento && (
                           <span className="text-[10px] bg-slate-700 text-slate-200 px-2 py-0.5 rounded">
-                            Vence día {t.diaVencimiento}
+                            Vence: Día {t.diaVencimiento}
                           </span>
                         )}
                       </div>
@@ -3490,32 +3499,45 @@ export default function App() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
+                  <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Día de Corte (1-31)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="31"
+                    placeholder="Ej: 20"
+                    value={diaCorteTarjetaForm}
+                    onChange={(e) => setDiaCorteTarjetaForm(e.target.value)}
+                    className={`w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500' : 'bg-white border-slate-200 text-slate-800'}`}
+                  />
+                </div>
+
+                <div>
                   <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Día de Vencimiento (1-31)</label>
                   <input
                     type="number"
                     min="1"
                     max="31"
-                    placeholder="Ej: 15"
+                    placeholder="Ej: 5"
                     value={diaVencimientoTarjetaForm}
                     onChange={(e) => setDiaVencimientoTarjetaForm(e.target.value)}
                     className={`w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500' : 'bg-white border-slate-200 text-slate-800'}`}
                   />
                 </div>
-
-                {!tarjetaEditandoId && (
-                  <div>
-                    <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Deuda Inicial (Opcional)</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      placeholder="0.00"
-                      value={deudaInicialTarjetaForm}
-                      onChange={(e) => setDeudaInicialTarjetaForm(e.target.value)}
-                      className={`w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500' : 'bg-white border-slate-200 text-slate-800'}`}
-                    />
-                  </div>
-                )}
               </div>
+
+              {!tarjetaEditandoId && (
+                <div>
+                  <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Deuda Inicial (Opcional)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    placeholder="0.00"
+                    value={deudaInicialTarjetaForm}
+                    onChange={(e) => setDeudaInicialTarjetaForm(e.target.value)}
+                    className={`w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500' : 'bg-white border-slate-200 text-slate-800'}`}
+                  />
+                </div>
+              )}
 
               <div className="flex gap-3 pt-2">
                 <button
