@@ -78,13 +78,11 @@ const CATEGORIAS_INGRESOS_DEFECTO = [
   'Sueldo / Salario', 'Ventas', 'Freelance', 'Inversiones', 'Regalo', 'Otros Ingresos'
 ];
 
-const CUENTAS_DEFECTO = [
-  { id: 'c1', nombre: 'BCP Débito', tipo: 'Bancaria', moneda: 'PEN', saldoInicial: 0, color: '#3B82F6' },
-  { id: 'c2', nombre: 'BBVA Débito', tipo: 'Bancaria', moneda: 'PEN', saldoInicial: 0, color: '#10B981' },
-  { id: 'c3', nombre: 'Yape', tipo: 'Billetera Digital', moneda: 'PEN', saldoInicial: 0, color: '#8B5CF6' },
-  { id: 'c4', nombre: 'Plin', tipo: 'Billetera Digital', moneda: 'PEN', saldoInicial: 0, color: '#06B6D4' },
-  { id: 'c5', nombre: 'Efectivo', tipo: 'Efectivo', moneda: 'PEN', saldoInicial: 0, color: '#F59E0B' }
-];
+// Valores por defecto completamente limpios (sin datos iniciales ni saldos ficticios)
+const CUENTAS_DEFECTO = [];
+const TARJETAS_DEFECTO = [];
+const PRESTAMOS_DEFECTO = [];
+const TRANSACCIONES_DEFECTO = [];
 
 const COLORES_CATEGORIAS = [
   '#6366F1', '#EC4899', '#10B981', '#F59E0B', 
@@ -95,7 +93,7 @@ const COLORES_CATEGORIAS = [
 const loadUserData = (username, key, defaultValue) => {
   try {
     const saved = localStorage.getItem(`finanzas_app_${username}_${key}`);
-    return saved ? JSON.parse(saved) : defaultValue;
+    return saved !== null ? JSON.parse(saved) : defaultValue;
   } catch (e) {
     return defaultValue;
   }
@@ -112,7 +110,7 @@ const saveUserData = (username, key, value) => {
 const leerJSON = (clave, porDefecto) => {
   try {
     const raw = localStorage.getItem(clave);
-    return raw ? JSON.parse(raw) : porDefecto;
+    return raw !== null ? JSON.parse(raw) : porDefecto;
   } catch (e) {
     return porDefecto;
   }
@@ -133,13 +131,13 @@ export default function App() {
     return loadUserData(user.username, 'dark_mode', false);
   });
   const [moneda, setMoneda] = useState(() => {
-    if (!user) return 'PEN';
-    return loadUserData(user.username, 'moneda', 'PEN');
+    if (!user) return 'CLP';
+    return loadUserData(user.username, 'moneda', 'CLP');
   });
 
   const [tiposCambio, setTiposCambio] = useState(() => {
-    if (!user) return { USD_PEN: 3.75, EUR_PEN: 4.10 };
-    return loadUserData(user.username, 'tipos_cambio', { USD_PEN: 3.75, EUR_PEN: 4.10 });
+    if (!user) return { USD_PEN: 3.75, EUR_PEN: 4.10, CLP_PEN: 0.0041, USD_CLP: 920, EUR_CLP: 1000 };
+    return loadUserData(user.username, 'tipos_cambio', { USD_PEN: 3.75, EUR_PEN: 4.10, CLP_PEN: 0.0041, USD_CLP: 920, EUR_CLP: 1000 });
   });
 
   // Categorías personalizadas por usuario
@@ -179,6 +177,7 @@ export default function App() {
   const [transacciones, setTransacciones] = useState([]);
   const [cuentasBancarias, setCuentasBancarias] = useState([]);
   const [tarjetas, setTarjetas] = useState([]);
+  const [cuotasTarjetas, setCuotasTarjetas] = useState([]);
   const [prestamos, setPrestamos] = useState([]);
   const [presupuestos, setPresupuestos] = useState({});
   const [presupuestoGlobal, setPresupuestoGlobal] = useState(0);
@@ -192,10 +191,11 @@ export default function App() {
   // Cargar datos al iniciar sesión o cambiar usuario
   useEffect(() => {
     if (!user) return;
-    setTransacciones(loadUserData(user.username, 'transacciones', []));
+    setTransacciones(loadUserData(user.username, 'transacciones', TRANSACCIONES_DEFECTO));
     setCuentasBancarias(loadUserData(user.username, 'cuentas_bancarias', CUENTAS_DEFECTO));
-    setTarjetas(loadUserData(user.username, 'tarjetas', []));
-    setPrestamos(loadUserData(user.username, 'prestamos', []));
+    setTarjetas(loadUserData(user.username, 'tarjetas', TARJETAS_DEFECTO));
+    setCuotasTarjetas(loadUserData(user.username, 'cuotas_tarjetas', []));
+    setPrestamos(loadUserData(user.username, 'prestamos', PRESTAMOS_DEFECTO));
     setPresupuestos(loadUserData(user.username, 'presupuestos', {}));
     setPresupuestoGlobal(loadUserData(user.username, 'presupuesto_global', 0));
     setRecurrentes(loadUserData(user.username, 'recurrentes', []));
@@ -218,11 +218,12 @@ export default function App() {
     saveUserData(user.username, 'transacciones', transacciones);
     saveUserData(user.username, 'cuentas_bancarias', cuentasBancarias);
     saveUserData(user.username, 'tarjetas', tarjetas);
+    saveUserData(user.username, 'cuotas_tarjetas', cuotasTarjetas);
     saveUserData(user.username, 'prestamos', prestamos);
     saveUserData(user.username, 'recurrentes', recurrentes);
     saveUserData(user.username, 'metas', metas);
     saveUserData(user.username, 'cierres_historicos', cierresHistoricos);
-  }, [user, darkMode, moneda, tiposCambio, catGastosPers, catIngresosPers, presupuestos, presupuestoGlobal, transacciones, cuentasBancarias, tarjetas, prestamos, recurrentes, metas, cierresHistoricos]);
+  }, [user, darkMode, moneda, tiposCambio, catGastosPers, catIngresosPers, presupuestos, presupuestoGlobal, transacciones, cuentasBancarias, tarjetas, cuotasTarjetas, prestamos, recurrentes, metas, cierresHistoricos]);
 
   // Helper para formato de fecha local en formato YYYY-MM-DD
   const getFechaLocalHoy = () => {
@@ -259,6 +260,7 @@ export default function App() {
   const [monedaCuentaForm, setMonedaCuentaForm] = useState('PEN');
   const [saldoInicialCuentaForm, setSaldoInicialCuentaForm] = useState('0');
   const [colorCuentaForm, setColorCuentaForm] = useState('#6366F1');
+  const [cuentaVinculadaIdForm, setCuentaVinculadaIdForm] = useState('');
 
   const [mostrarModalTransferencia, setMostrarModalTransferencia] = useState(false);
   const [cuentaOrigenId, setCuentaOrigenId] = useState('');
@@ -272,6 +274,13 @@ export default function App() {
   const [diaVencimientoTarjetaForm, setDiaVencimientoTarjetaForm] = useState('');
   const [deudaInicialTarjetaForm, setDeudaInicialTarjetaForm] = useState('');
   const [monedaTarjetaForm, setMonedaTarjetaForm] = useState('PEN');
+
+  const [mostrarModalCuotaTarjeta, setMostrarModalCuotaTarjeta] = useState(false);
+  const [tarjetaCuotaId, setTarjetaCuotaId] = useState('');
+  const [conceptoCuotaForm, setConceptoCuotaForm] = useState('');
+  const [montoTotalCuotaForm, setMontoTotalCuotaForm] = useState('');
+  const [numCuotasForm, setNumCuotasForm] = useState('3');
+  const [cuotaActualForm, setCuotaActualForm] = useState('1');
 
   const [mostrarModalPagoTarjeta, setMostrarModalPagoTarjeta] = useState(false);
   const [tarjetaAPagarId, setTarjetaAPagarId] = useState('');
@@ -294,7 +303,6 @@ export default function App() {
   const [prestamoSeleccionadoId, setPrestamoSeleccionadoId] = useState('');
   const [cuentaOrigenAbonoPrestamoId, setCuentaOrigenAbonoPrestamoId] = useState('');
   const [montoAbonoPrestamo, setMontoAbonoPrestamo] = useState('');
-  const [monedaAbonoForm, setMonedaAbonoForm] = useState('PEN');
 
   const [mostrarModalPresupuesto, setMostrarModalPresupuesto] = useState(false);
   const [categoriaPresupuesto, setCategoriaPresupuesto] = useState(CATEGORIAS_GASTOS_DEFECTO[0]);
@@ -309,17 +317,11 @@ export default function App() {
   const [monedaRecurrenteForm, setMonedaRecurrenteForm] = useState('PEN');
   const [cuentaRecurrenteId, setCuentaRecurrenteId] = useState('');
 
-  const [mostrarModalMeta, setMostrarModalMeta] = useState(false);
-  const [nombreMetaForm, setNombreMetaForm] = useState('');
-  const [objetivoMetaForm, setObjetivoMetaForm] = useState('');
-  const [actualMetaForm, setActualMetaForm] = useState('');
-  const [fechaLimiteMetaForm, setFechaLimiteMetaForm] = useState('');
-
   const [mostrarModalConfig, setMostrarModalConfig] = useState(false);
   const [mostrarModalInfoData, setMostrarModalInfoData] = useState(false);
   const [mensajeRespaldo, setMensajeRespaldo] = useState(null);
 
-  // Conversor de divisas
+  // Conversor de divisas ampliado con soporte para CLP
   const convertirMoneda = (monto, monedaOrigen, monedaDestino = moneda) => {
     if (!monto) return 0;
     if (monedaOrigen === monedaDestino) return Number(monto);
@@ -327,17 +329,19 @@ export default function App() {
     let enPen = Number(monto);
     if (monedaOrigen === 'USD') enPen = Number(monto) * (tiposCambio.USD_PEN || 3.75);
     if (monedaOrigen === 'EUR') enPen = Number(monto) * (tiposCambio.EUR_PEN || 4.10);
+    if (monedaOrigen === 'CLP') enPen = Number(monto) * (tiposCambio.CLP_PEN || 0.0041);
 
     if (monedaDestino === 'PEN') return enPen;
     if (monedaDestino === 'USD') return enPen / (tiposCambio.USD_PEN || 3.75);
     if (monedaDestino === 'EUR') return enPen / (tiposCambio.EUR_PEN || 4.10);
+    if (monedaDestino === 'CLP') return enPen / (tiposCambio.CLP_PEN || 0.0041);
 
     return enPen;
   };
 
   const formatoMoneda = (monto, codMoneda = moneda) => {
-    const sim = codMoneda === 'PEN' ? 'S/' : codMoneda === 'USD' ? '$' : '€';
-    return `${sim} ${Number(monto || 0).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const sim = codMoneda === 'PEN' ? 'S/' : codMoneda === 'USD' ? '$' : codMoneda === 'CLP' ? '$' : '€';
+    return `${sim} ${Number(monto || 0).toLocaleString('es-CL', { minimumFractionDigits: codMoneda === 'CLP' ? 0 : 2, maximumFractionDigits: codMoneda === 'CLP' ? 0 : 2 })}`;
   };
 
   const cambiarMesSiguiente = () => {
@@ -419,10 +423,6 @@ export default function App() {
       }
     });
 
-    document.cookie.split(";").forEach((c) => {
-      document.cookie = c.replace(/^ +/, "").replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/");
-    });
-
     setMostrarModalBorrarCache(false);
     setConfirmarTextoBorrar('');
     setUser(null);
@@ -492,9 +492,9 @@ export default function App() {
     }
   };
 
-  // Cálculo de saldos actuales por cuenta de manera dinámica
+  // Cálculo de saldos actuales por cuenta con soporte de vinculación
   const cuentasConSaldosActuales = useMemo(() => {
-    return cuentasBancarias.map((cta, index) => {
+    const baseCuentas = cuentasBancarias.map((cta, index) => {
       let saldo = Number(cta.saldoInicial || 0);
 
       transacciones.forEach(t => {
@@ -516,7 +516,21 @@ export default function App() {
 
       return {
         ...cta,
-        saldoActual: saldo
+        saldoBase: saldo
+      };
+    });
+
+    return baseCuentas.map(cta => {
+      let saldoFinal = cta.saldoBase;
+      if (cta.cuentaVinculadaId) {
+        const principal = baseCuentas.find(c => c.id === cta.cuentaVinculadaId);
+        if (principal) {
+          saldoFinal = principal.saldoBase;
+        }
+      }
+      return {
+        ...cta,
+        saldoActual: saldoFinal
       };
     });
   }, [cuentasBancarias, transacciones, tiposCambio]);
@@ -946,9 +960,7 @@ export default function App() {
   };
 
   const eliminarTransaccion = (t) => {
-    if (confirm('¿Deseas eliminar este registro de movimiento?')) {
-      setTransacciones(prev => prev.filter(item => item.id !== t.id));
-    }
+    setTransacciones(prev => prev.filter(item => item.id !== t.id));
   };
 
   // Cuentas Handlers
@@ -962,7 +974,8 @@ export default function App() {
       tipo: tipoCuentaForm,
       moneda: monedaCuentaForm,
       saldoInicial: parseFloat(saldoInicialCuentaForm) || 0,
-      color: colorCuentaForm
+      color: colorCuentaForm,
+      cuentaVinculadaId: cuentaVinculadaIdForm || null
     };
 
     if (cuentaEditandoId) {
@@ -976,12 +989,9 @@ export default function App() {
 
   const eliminarCuenta = (id) => {
     if (cuentasBancarias.length <= 1) {
-      alert('Debes mantener al menos una cuenta líquida activa.');
       return;
     }
-    if (confirm('¿Seguro de eliminar esta cuenta?')) {
-      setCuentasBancarias(prev => prev.filter(c => c.id !== id));
-    }
+    setCuentasBancarias(prev => prev.filter(c => c.id !== id));
   };
 
   const realizarTransferencia = (e) => {
@@ -1028,23 +1038,86 @@ export default function App() {
     e.preventDefault();
     if (!nombreTarjetaForm.trim() || !limiteTarjetaForm) return;
 
-    const nuevaTarjeta = {
+    const tarjetaData = {
       id: tarjetaEditandoId || `tarj_${Date.now()}`,
       nombre: nombreTarjetaForm.trim(),
       limite: parseFloat(limiteTarjetaForm),
       diaVencimiento: diaVencimientoTarjetaForm ? parseInt(diaVencimientoTarjetaForm, 10) : null,
-      deudaActual: parseFloat(deudaInicialTarjetaForm) || 0,
       moneda: monedaTarjetaForm
     };
 
-    setTarjetas(prev => [...prev, nuevaTarjeta]);
+    if (tarjetaEditandoId) {
+      setTarjetas(prev => prev.map(t => {
+        if (t.id === tarjetaEditandoId) {
+          return {
+            ...t,
+            ...tarjetaData
+          };
+        }
+        return t;
+      }));
+    } else {
+      setTarjetas(prev => [...prev, { ...tarjetaData, deudaActual: parseFloat(deudaInicialTarjetaForm) || 0 }]);
+    }
+
     setMostrarModalTarjeta(false);
   };
 
-  const eliminarTarjeta = (id) => {
-    if (confirm('¿Deseas eliminar esta tarjeta?')) {
-      setTarjetas(prev => prev.filter(t => t.id !== id));
+  const guardarCompraCuotas = (e) => {
+    e.preventDefault();
+    const montoTotal = parseFloat(montoTotalCuotaForm);
+    const totalCuotas = parseInt(numCuotasForm, 10);
+    const cuotaActual = parseInt(cuotaActualForm, 10);
+
+    if (!montoTotal || montoTotal <= 0 || !tarjetaCuotaId || !conceptoCuotaForm.trim()) return;
+
+    const tarj = tarjetas.find(t => t.id === tarjetaCuotaId);
+    if (!tarj) return;
+
+    const valorCuotaMensual = montoTotal / totalCuotas;
+
+    const nuevaCompraCuotas = {
+      id: `cuota_${Date.now()}`,
+      tarjetaId: tarj.id,
+      tarjetaNombre: tarj.nombre,
+      concepto: conceptoCuotaForm.trim(),
+      montoTotal,
+      valorCuotaMensual,
+      totalCuotas,
+      cuotaActual: Math.min(cuotaActual, totalCuotas),
+      moneda: tarj.moneda || 'PEN',
+      fechaRegistro: getFechaLocalHoy()
+    };
+
+    setCuotasTarjetas(prev => [...prev, nuevaCompraCuotas]);
+
+    setTarjetas(prev => prev.map(t => {
+      if (t.id === tarj.id) {
+        return { ...t, deudaActual: (t.deudaActual || 0) + valorCuotaMensual };
+      }
+      return t;
+    }));
+
+    setMostrarModalCuotaTarjeta(false);
+    setConceptoCuotaForm('');
+    setMontoTotalCuotaForm('');
+  };
+
+  const eliminarCompraCuotas = (id) => {
+    const cuotaItem = cuotasTarjetas.find(c => c.id === id);
+    if (cuotaItem) {
+      setTarjetas(prev => prev.map(t => {
+        if (t.id === cuotaItem.tarjetaId) {
+          return { ...t, deudaActual: Math.max(0, (t.deudaActual || 0) - cuotaItem.valorCuotaMensual) };
+        }
+        return t;
+      }));
     }
+    setCuotasTarjetas(prev => prev.filter(c => c.id !== id));
+  };
+
+  const eliminarTarjeta = (id) => {
+    setTarjetas(prev => prev.filter(t => t.id !== id));
   };
 
   const registrarPagoTarjeta = (e) => {
@@ -1121,9 +1194,7 @@ export default function App() {
   };
 
   const eliminarPrestamo = (id) => {
-    if (confirm('¿Deseas eliminar este registro de préstamo?')) {
-      setPrestamos(prev => prev.filter(p => p.id !== id));
-    }
+    setPrestamos(prev => prev.filter(p => p.id !== id));
   };
 
   const registrarAbonoPrestamo = (e) => {
@@ -1235,24 +1306,6 @@ export default function App() {
     setRecurrentes(prev => prev.map(r => r.id === rec.id ? { ...r, ultimoMesRegistrado: claveMesAnio } : r));
   };
 
-  // Metas Handlers
-  const agregarMeta = (e) => {
-    e.preventDefault();
-    const obj = parseFloat(objetivoMetaForm);
-    if (!obj || obj <= 0 || !nombreMetaForm.trim()) return;
-
-    const nuevaMeta = {
-      id: `meta_${Date.now()}`,
-      nombre: nombreMetaForm.trim(),
-      objetivo: obj,
-      actual: parseFloat(actualMetaForm) || 0,
-      fechaLimite: fechaLimiteMetaForm || null
-    };
-
-    setMetas(prev => [...prev, nuevaMeta]);
-    setMostrarModalMeta(false);
-  };
-
   // Cierre de Mes Manual
   const ejecutarCierreMes = () => {
     const clavePeriodo = `${NOMBRES_MESES[mesSeleccionado]} ${anioSeleccionado}`;
@@ -1269,7 +1322,6 @@ export default function App() {
 
     setCierresHistoricos(prev => [nuevoCierre, ...prev.filter(c => c.periodo !== clavePeriodo)]);
     setMostrarModalCierre(false);
-    alert(`Corte de caja de ${clavePeriodo} completado y archivado correctamente.`);
   };
 
   // Respaldo JSON / CSV
@@ -1278,6 +1330,7 @@ export default function App() {
       transacciones,
       cuentasBancarias,
       tarjetas,
+      cuotasTarjetas,
       prestamos,
       presupuestos,
       presupuestoGlobal,
@@ -1308,6 +1361,7 @@ export default function App() {
         if (imported.transacciones) setTransacciones(imported.transacciones);
         if (imported.cuentasBancarias) setCuentasBancarias(imported.cuentasBancarias);
         if (imported.tarjetas) setTarjetas(imported.tarjetas);
+        if (imported.cuotasTarjetas) setCuotasTarjetas(imported.cuotasTarjetas);
         if (imported.prestamos) setPrestamos(imported.prestamos);
         if (imported.presupuestos) setPresupuestos(imported.presupuestos);
         if (imported.presupuestoGlobal) setPresupuestoGlobal(imported.presupuestoGlobal);
@@ -1368,7 +1422,7 @@ export default function App() {
                 <input
                   type="text"
                   required
-                  placeholder="Ej: juanperez"
+                  placeholder="Ej: demo"
                   value={usernameForm}
                   onChange={(e) => setUsernameForm(e.target.value)}
                   className="w-full pl-9 pr-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800"
@@ -1446,6 +1500,21 @@ export default function App() {
             </button>
           </form>
 
+          {/* ACCESO RÁPIDO DEMO */}
+          <div className="pt-3 border-t border-slate-100">
+            <button
+              type="button"
+              onClick={() => {
+                const demoUser = { username: 'demo', uid: 'usr_demo_guest' };
+                localStorage.setItem('finanzas_active_user', JSON.stringify(demoUser));
+                setUser(demoUser);
+              }}
+              className="w-full py-2 bg-emerald-50 text-emerald-700 font-bold border border-emerald-200 rounded-xl text-xs hover:bg-emerald-100 transition-colors flex items-center justify-center gap-1.5"
+            >
+              <Sparkles className="w-4 h-4 text-emerald-600" /> Probar con Usuario Demo
+            </button>
+          </div>
+
           <div className="text-center pt-2 border-t border-slate-100 flex flex-col gap-2">
             <button
               type="button"
@@ -1469,157 +1538,6 @@ export default function App() {
               <Trash2 className="w-3.5 h-3.5" /> Borrar caché y datos guardados de la app
             </button>
           </div>
-
-          {/* MODAL BORRAR CACHÉ */}
-          {mostrarModalBorrarCache && (
-            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-              <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 space-y-4 text-slate-800">
-                <div className="flex items-center gap-3 text-rose-600 border-b border-rose-100 pb-3">
-                  <div className="p-2 bg-rose-100 rounded-xl">
-                    <AlertTriangle className="w-6 h-6" />
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-base text-slate-900">¿Limpiar caché y datos?</h3>
-                    <p className="text-[11px] text-rose-600 font-semibold">Esta acción es irreversible</p>
-                  </div>
-                </div>
-
-                <div className="space-y-2 text-xs text-slate-600">
-                  <p>
-                    Se eliminarán <strong>todos los usuarios registrados</strong>, sus transacciones, tarjetas, préstamos y configuraciones almacenadas localmente.
-                  </p>
-                </div>
-
-                <div className="space-y-3 pt-1">
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                      Escribe <span className="text-rose-600 font-extrabold uppercase">BORRAR</span> para confirmar:
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="BORRAR"
-                      value={confirmarTextoBorrar}
-                      onChange={(e) => setConfirmarTextoBorrar(e.target.value)}
-                      className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs font-mono font-bold uppercase focus:outline-none focus:ring-2 focus:ring-rose-500"
-                    />
-                  </div>
-
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setMostrarModalBorrarCache(false)}
-                      className="flex-1 py-2 border border-slate-200 text-slate-600 rounded-xl text-xs font-semibold hover:bg-slate-50 transition-colors"
-                    >
-                      Cancelar
-                    </button>
-                    <button
-                      type="button"
-                      disabled={confirmarTextoBorrar.trim().toUpperCase() !== 'BORRAR'}
-                      onClick={handleBorrarCachePagina}
-                      className="flex-1 py-2 bg-rose-600 text-white font-semibold rounded-xl text-xs hover:bg-rose-700 disabled:opacity-40 shadow-sm transition-all"
-                    >
-                      Sí, Borrar Todo
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* MODAL RECUPERAR CONTRASEÑA */}
-          {mostrarModalRecuperar && (
-            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-              <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 space-y-4 text-slate-800">
-                <div className="flex justify-between items-center border-b border-slate-100 pb-2">
-                  <h3 className="font-bold text-base text-slate-900 flex items-center gap-2">
-                    <ShieldCheck className="w-5 h-5 text-indigo-600" />
-                    Recuperar Contraseña
-                  </h3>
-                  <button
-                    onClick={() => setMostrarModalRecuperar(false)}
-                    className="text-slate-400 hover:text-slate-600 text-sm font-bold"
-                  >
-                    ✕
-                  </button>
-                </div>
-
-                {mensajeRecuperacion && (
-                  <div className={`p-3 rounded-xl text-xs font-medium ${mensajeRecuperacion.tipo === 'ok' ? 'bg-emerald-50 text-emerald-600 border border-emerald-200' : 'bg-rose-50 text-rose-600 border border-rose-200'}`}>
-                    {mensajeRecuperacion.texto}
-                  </div>
-                )}
-
-                {pasoRecuperacion === 1 ? (
-                  <form onSubmit={handleBuscarUsuarioRecuperacion} className="space-y-4">
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-600 mb-1">Nombre de Usuario</label>
-                      <input
-                        type="text"
-                        required
-                        placeholder="Ej: juanperez"
-                        value={userRecuperar}
-                        onChange={(e) => setUserRecuperar(e.target.value)}
-                        className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500"
-                      />
-                    </div>
-                    <button
-                      type="submit"
-                      className="w-full py-2.5 bg-indigo-600 text-white font-semibold rounded-xl text-xs hover:bg-indigo-700 shadow-sm"
-                    >
-                      Continuar
-                    </button>
-                  </form>
-                ) : (
-                  <form onSubmit={handleRestablecerPassword} className="space-y-4">
-                    <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl">
-                      <span className="block text-[11px] font-bold text-slate-500 uppercase">Pregunta de Seguridad:</span>
-                      <p className="text-xs font-semibold text-slate-800 mt-0.5">{preguntaUsuario}</p>
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-600 mb-1">Tu Respuesta Secreta</label>
-                      <input
-                        type="text"
-                        required
-                        placeholder="Respuesta..."
-                        value={respuestaRecuperar}
-                        onChange={(e) => setRespuestaRecuperar(e.target.value)}
-                        className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-600 mb-1">Nueva Contraseña</label>
-                      <input
-                        type="password"
-                        required
-                        placeholder="••••••••"
-                        value={nuevaPasswordForm}
-                        onChange={(e) => setNuevaPasswordForm(e.target.value)}
-                        className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500"
-                      />
-                    </div>
-
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setPasoRecuperacion(1)}
-                        className="flex-1 py-2 border border-slate-200 text-slate-600 rounded-xl text-xs font-semibold hover:bg-slate-50"
-                      >
-                        Atrás
-                      </button>
-                      <button
-                        type="submit"
-                        className="flex-1 py-2 bg-indigo-600 text-white rounded-xl text-xs font-semibold hover:bg-indigo-700 shadow-sm"
-                      >
-                        Guardar
-                      </button>
-                    </div>
-                  </form>
-                )}
-              </div>
-            </div>
-          )}
         </div>
       </div>
     );
@@ -1810,6 +1728,7 @@ export default function App() {
                 setTipoCuentaForm('Bancaria');
                 setMonedaCuentaForm('PEN');
                 setColorCuentaForm('#6366F1');
+                setCuentaVinculadaIdForm('');
                 setMostrarModalCuenta(true);
               }}
               className="flex-1 md:flex-initial flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl font-semibold shadow-sm transition-all text-sm"
@@ -2107,58 +2026,6 @@ export default function App() {
           </div>
         )}
 
-        {/* PESTAÑA AUDITORÍA E HISTORIAL DE PAGOS */}
-        {seccionActiva === 'auditoria' && (
-          <section className={`p-6 rounded-2xl shadow-sm border space-y-4 ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100'}`}>
-            <div>
-              <h3 className={`text-lg font-bold flex items-center gap-2 ${darkMode ? 'text-slate-100' : 'text-slate-800'}`}>
-                <History className="w-5 h-5 text-emerald-500" />
-                Historial de Pagos de Tarjetas y Préstamos (Auditoría)
-              </h3>
-              <p className="text-xs text-slate-400">Registro histórico completo de amortizaciones a préstamos y cancelaciones a tarjetas de crédito.</p>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className={`border-b text-xs uppercase tracking-wider ${darkMode ? 'border-slate-800 text-slate-400' : 'border-slate-100 text-slate-500'}`}>
-                    <th className="py-3 px-4 font-semibold">Fecha</th>
-                    <th className="py-3 px-4 font-semibold">Tipo</th>
-                    <th className="py-3 px-4 font-semibold">Detalle / Destino</th>
-                    <th className="py-3 px-4 font-semibold">Cuenta de Origen</th>
-                    <th className="py-3 px-4 font-semibold text-right">Monto Pagado</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y text-sm">
-                  {historialPagosEspeciales.length === 0 ? (
-                    <tr>
-                      <td colSpan="5" className="py-8 text-center text-slate-400">
-                        No has registrado pagos de tarjetas o amortizaciones de préstamos aún.
-                      </td>
-                    </tr>
-                  ) : (
-                    historialPagosEspeciales.map((t) => (
-                      <tr key={t.id} className={`transition-colors ${darkMode ? 'border-slate-800 hover:bg-slate-800/50' : 'border-slate-50 hover:bg-slate-50'}`}>
-                        <td className="py-3 px-4 text-xs text-slate-400 whitespace-nowrap">{t.fecha}</td>
-                        <td className="py-3 px-4">
-                          <span className={`text-xs px-2.5 py-1 rounded-full font-bold ${t.tipo === 'pago_tarjeta' ? 'bg-purple-500/20 text-purple-400' : 'bg-amber-500/20 text-amber-400'}`}>
-                            {t.tipo === 'pago_tarjeta' ? 'Tarjeta' : 'Préstamo'}
-                          </span>
-                        </td>
-                        <td className={`py-3 px-4 font-medium ${darkMode ? 'text-slate-200' : 'text-slate-800'}`}>{t.descripcion}</td>
-                        <td className="py-3 px-4 text-xs text-slate-400">{t.metodo}</td>
-                        <td className="py-3 px-4 text-right font-bold text-rose-500 whitespace-nowrap">
-                          {formatoMoneda(t.monto, t.moneda || 'PEN')}
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        )}
-
         {/* VISTA DEDICADA CUENTAS Y BILLETERAS */}
         {seccionActiva === 'cuentas' && (
           <section className={`p-6 rounded-2xl shadow-sm border space-y-4 ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100'}`}>
@@ -2173,15 +2040,13 @@ export default function App() {
               <div className="flex gap-2 w-full sm:w-auto">
                 <button
                   onClick={() => {
-                    if (cuentasBancarias.length < 2) {
-                      alert('Necesitas al menos 2 cuentas para realizar una transferencia.');
-                      return;
-                    }
+                    if (cuentasBancarias.length < 2) return;
                     setCuentaOrigenId(cuentasBancarias[0].id);
                     setCuentaDestinoId(cuentasBancarias[1].id);
                     setMostrarModalTransferencia(true);
                   }}
-                  className="flex-1 sm:flex-initial bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20 px-3 py-1.5 rounded-xl font-semibold text-xs flex items-center justify-center gap-1 border border-indigo-500/30 transition-colors"
+                  disabled={cuentasBancarias.length < 2}
+                  className="flex-1 sm:flex-initial bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20 disabled:opacity-40 px-3 py-1.5 rounded-xl font-semibold text-xs flex items-center justify-center gap-1 border border-indigo-500/30 transition-colors"
                 >
                   <ArrowRightLeft className="w-4 h-4" /> Transferir entre cuentas
                 </button>
@@ -2193,6 +2058,7 @@ export default function App() {
                     setTipoCuentaForm('Bancaria');
                     setMonedaCuentaForm('PEN');
                     setColorCuentaForm('#6366F1');
+                    setCuentaVinculadaIdForm('');
                     setMostrarModalCuenta(true);
                   }}
                   className="flex-1 sm:flex-initial bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-xl font-semibold text-xs flex items-center justify-center gap-1 shadow-sm transition-colors"
@@ -2202,85 +2068,121 @@ export default function App() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {cuentasConSaldosActuales.map(cta => (
-                <div key={cta.id} className={`p-5 rounded-2xl relative group shadow-sm border ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
-                  <div className="absolute top-4 right-4 flex items-center gap-2">
-                    <button
-                      onClick={() => {
-                        setCuentaEditandoId(cta.id);
-                        setNombreCuentaForm(cta.nombre);
-                        setTipoCuentaForm(cta.tipo || 'Bancaria');
-                        setMonedaCuentaForm(cta.moneda || 'PEN');
-                        setSaldoInicialCuentaForm(String(cta.saldoInicial || 0));
-                        setColorCuentaForm(cta.color || '#6366F1');
-                        setMostrarModalCuenta(true);
-                      }}
-                      className="text-slate-400 hover:text-indigo-400 transition-colors"
-                      title="Editar cuenta"
-                    >
-                      <Pencil className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => eliminarCuenta(cta.id)}
-                      className="text-slate-400 hover:text-rose-500 transition-colors"
-                      title="Eliminar cuenta"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
+            {cuentasConSaldosActuales.length === 0 ? (
+              <div className={`p-8 text-center border-2 border-dashed rounded-xl text-slate-400 text-sm ${darkMode ? 'border-slate-800' : 'border-slate-200'}`}>
+                No tienes cuentas o billeteras agregadas. Haz clic en <strong>+ Nueva Cuenta</strong> para empezar a registrar tus saldos.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {cuentasConSaldosActuales.map(cta => {
+                  const ctaVinculada = cuentasBancarias.find(c => c.id === cta.cuentaVinculadaId);
 
-                  <div className="flex items-center gap-2 mb-2">
-                    <div className="w-3 h-3 rounded-full" style={{ backgroundColor: cta.color || '#6366F1' }}></div>
-                    <span className="text-[10px] bg-slate-700 text-slate-200 px-2 py-0.5 rounded font-mono font-bold">
-                      {cta.tipo || 'Bancaria'}
-                    </span>
-                    <span className="text-[10px] bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded-full font-bold">
-                      {cta.moneda || 'PEN'}
-                    </span>
-                  </div>
+                  return (
+                    <div key={cta.id} className={`p-5 rounded-2xl relative group shadow-sm border ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                      <div className="absolute top-4 right-4 flex items-center gap-2">
+                        <button
+                          onClick={() => {
+                            setCuentaEditandoId(cta.id);
+                            setNombreCuentaForm(cta.nombre);
+                            setTipoCuentaForm(cta.tipo || 'Bancaria');
+                            setMonedaCuentaForm(cta.moneda || 'PEN');
+                            setSaldoInicialCuentaForm(String(cta.saldoInicial || 0));
+                            setColorCuentaForm(cta.color || '#6366F1');
+                            setCuentaVinculadaIdForm(cta.cuentaVinculadaId || '');
+                            setMostrarModalCuenta(true);
+                          }}
+                          className="text-slate-400 hover:text-indigo-400 transition-colors"
+                          title="Editar cuenta"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => eliminarCuenta(cta.id)}
+                          className="text-slate-400 hover:text-rose-500 transition-colors"
+                          title="Eliminar cuenta"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
 
-                  <h4 className={`font-bold text-lg mb-1 ${darkMode ? 'text-slate-100' : 'text-slate-800'}`}>{cta.nombre}</h4>
-                  
-                  <div className="mt-4 pt-3 border-t border-slate-700/50 flex justify-between items-end">
-                    <div>
-                      <span className="text-[10px] text-slate-400 block">Saldo Actual Disponible:</span>
-                      <span className={`text-xl font-black ${cta.saldoActual < 0 ? 'text-rose-500' : 'text-emerald-400'}`}>
-                        {formatoMoneda(cta.saldoActual, cta.moneda || 'PEN')}
-                      </span>
+                      <div className="flex items-center gap-2 mb-2">
+                        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: cta.color || '#6366F1' }}></div>
+                        <span className="text-[10px] bg-slate-700 text-slate-200 px-2 py-0.5 rounded font-mono font-bold">
+                          {cta.tipo || 'Bancaria'}
+                        </span>
+                        <span className="text-[10px] bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded-full font-bold">
+                          {cta.moneda || 'PEN'}
+                        </span>
+                      </div>
+
+                      <h4 className={`font-bold text-lg mb-1 ${darkMode ? 'text-slate-100' : 'text-slate-800'}`}>{cta.nombre}</h4>
+                      
+                      {ctaVinculada && (
+                        <div className="mb-2">
+                          <span className="text-[10px] bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded-full font-medium inline-flex items-center gap-1">
+                            🔗 Vinculado a {ctaVinculada.nombre}
+                          </span>
+                        </div>
+                      )}
+
+                      <div className="mt-4 pt-3 border-t border-slate-700/50 flex justify-between items-end">
+                        <div>
+                          <span className="text-[10px] text-slate-400 block">Saldo Actual Disponible:</span>
+                          <span className={`text-xl font-black ${cta.saldoActual < 0 ? 'text-rose-500' : 'text-emerald-400'}`}>
+                            {formatoMoneda(cta.saldoActual, cta.moneda || 'PEN')}
+                          </span>
+                        </div>
+                        <span className="text-[10px] text-slate-400 font-mono">
+                          Inicial: {formatoMoneda(cta.saldoInicial, cta.moneda || 'PEN')}
+                        </span>
+                      </div>
                     </div>
-                    <span className="text-[10px] text-slate-400 font-mono">
-                      Inicial: {formatoMoneda(cta.saldoInicial, cta.moneda || 'PEN')}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
+                  );
+                })}
+              </div>
+            )}
           </section>
         )}
 
-        {/* VISTA DEDICADA TARJETAS */}
+        {/* VISTA DEDICADA TARJETAS DE CRÉDITO Y CUOTAS */}
         {seccionActiva === 'tarjetas' && (
-          <section className={`p-6 rounded-2xl shadow-sm border space-y-4 ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100'}`}>
-            <div className="flex justify-between items-center">
+          <section className={`p-6 rounded-2xl shadow-sm border space-y-6 ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100'}`}>
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
               <div>
                 <h3 className={`text-lg font-bold flex items-center gap-2 ${darkMode ? 'text-slate-100' : 'text-slate-800'}`}>
                   <CreditCard className="w-5 h-5 text-purple-500" />
-                  Gestión de Tarjetas de Crédito ({tarjetas.length})
+                  Tarjetas de Crédito y Compras en Cuotas ({tarjetas.length})
                 </h3>
-                <p className="text-xs text-slate-400">Consulta el uso porcentual, estado de sobregiro y realiza pagos líquidos instantáneos.</p>
+                <p className="text-xs text-slate-400">Controla tus líneas de crédito, fechas de pago y tus consumos fraccionados en cuotas mensuales.</p>
               </div>
-              <div className="flex gap-2">
+
+              <div className="flex flex-wrap gap-2 w-full sm:w-auto">
                 {tarjetas.length > 0 && (
-                  <button
-                    onClick={() => {
-                      if (cuentasBancarias.length > 0) setCuentaOrigenPagoTarjetaId(cuentasBancarias[0].id);
-                      setMostrarModalPagoTarjeta(true);
-                    }}
-                    className="bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 px-3 py-1.5 rounded-xl font-semibold text-xs flex items-center gap-1 border border-purple-500/30 transition-colors"
-                  >
-                    <ArrowRightLeft className="w-4 h-4" /> Pagar Tarjeta (Gasto Líquido)
-                  </button>
+                  <>
+                    <button
+                      onClick={() => {
+                        setTarjetaAPagarId(tarjetas[0].id);
+                        if (cuentasBancarias.length > 0) setCuentaOrigenPagoTarjetaId(cuentasBancarias[0].id);
+                        setMostrarModalPagoTarjeta(true);
+                      }}
+                      className="flex-1 sm:flex-initial bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 px-3 py-1.5 rounded-xl font-semibold text-xs flex items-center justify-center gap-1 border border-purple-500/30 transition-colors"
+                    >
+                      <ArrowRightLeft className="w-4 h-4" /> Pagar Tarjeta
+                    </button>
+                    <button
+                      onClick={() => {
+                        setTarjetaCuotaId(tarjetas[0].id);
+                        setConceptoCuotaForm('');
+                        setMontoTotalCuotaForm('');
+                        setNumCuotasForm('3');
+                        setCuotaActualForm('1');
+                        setMostrarModalCuotaTarjeta(true);
+                      }}
+                      className="flex-1 sm:flex-initial bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20 px-3 py-1.5 rounded-xl font-semibold text-xs flex items-center justify-center gap-1 border border-indigo-500/30 transition-colors"
+                    >
+                      <Plus className="w-4 h-4" /> + Nueva Compra en Cuotas
+                    </button>
+                  </>
                 )}
                 <button
                   onClick={() => {
@@ -2292,32 +2194,42 @@ export default function App() {
                     setMonedaTarjetaForm('PEN');
                     setMostrarModalTarjeta(true);
                   }}
-                  className="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1.5 rounded-xl font-semibold text-xs flex items-center gap-1 shadow-sm transition-colors"
+                  className="flex-1 sm:flex-initial bg-purple-600 hover:bg-purple-700 text-white px-3 py-1.5 rounded-xl font-semibold text-xs flex items-center gap-1 shadow-sm transition-colors"
                 >
                   <Plus className="w-4 h-4" /> + Nueva Tarjeta
                 </button>
               </div>
             </div>
 
+            {/* LISTADO DE TARJETAS */}
             {tarjetas.length === 0 ? (
               <div className={`p-8 text-center border-2 border-dashed rounded-xl text-slate-400 text-sm ${darkMode ? 'border-slate-800' : 'border-slate-200'}`}>
-                No tienes tarjetas registradas. ¡Haz clic en <strong>+ Nueva Tarjeta</strong> para agregar una!
+                No tienes tarjetas de crédito registradas. Haz clic en <strong>+ Nueva Tarjeta</strong> para agregar una.
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {tarjetas.map(t => {
-                  const limiteNum = Number(t.limite || 1);
-                  const deudaNum = Number(t.deudaActual || 0);
-                  const porcentajeUso = Math.round((deudaNum / limiteNum) * 100);
-                  const disponible = Math.max(0, limiteNum - deudaNum);
-                  
-                  const sobregirada = porcentajeUso > 100;
-                  const precaucion = porcentajeUso >= 50 && porcentajeUso <= 100;
-                  const cuidado = porcentajeUso >= 25 && porcentajeUso < 50;
+                  const disponible = Math.max(0, (t.limite || 0) - (t.deudaActual || 0));
+                  const porcentajeUso = Math.min(100, Math.round(((t.deudaActual || 0) / (t.limite || 1)) * 100));
 
                   return (
                     <div key={t.id} className={`p-5 rounded-2xl relative group shadow-sm border ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
-                      <div className="absolute top-4 right-4 flex items-center gap-1">
+                      <div className="absolute top-4 right-4 flex items-center gap-2">
+                        <button
+                          onClick={() => {
+                            setTarjetaEditandoId(t.id);
+                            setNombreTarjetaForm(t.nombre);
+                            setLimiteTarjetaForm(String(t.limite));
+                            setDiaVencimientoTarjetaForm(t.diaVencimiento ? String(t.diaVencimiento) : '');
+                            setMonedaTarjetaForm(t.moneda || 'PEN');
+                            setDeudaInicialTarjetaForm(String(t.deudaActual || 0));
+                            setMostrarModalTarjeta(true);
+                          }}
+                          className="text-slate-400 hover:text-purple-400 transition-colors"
+                          title="Editar tarjeta"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
                         <button
                           onClick={() => eliminarTarjeta(t.id)}
                           className="text-slate-400 hover:text-rose-500 transition-colors"
@@ -2327,66 +2239,93 @@ export default function App() {
                         </button>
                       </div>
 
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-[10px] bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded-full font-bold uppercase">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-[10px] bg-purple-500/20 text-purple-300 border border-purple-500/30 px-2 py-0.5 rounded-full font-bold">
                           {t.moneda || 'PEN'}
                         </span>
-                        {sobregirada ? (
-                          <span className="text-[10px] bg-rose-500/20 text-rose-400 border border-rose-500/30 px-2 py-0.5 rounded-full font-bold animate-pulse flex items-center gap-1">
-                            <AlertTriangle className="w-3 h-3" /> Sobregiro (&gt;100%)
-                          </span>
-                        ) : precaucion ? (
-                          <span className="text-[10px] bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
-                            ⚠️ Precaución (50-100%)
-                          </span>
-                        ) : cuidado ? (
-                          <span className="text-[10px] bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
-                            ⚡ Cuidado (25-50%)
-                          </span>
-                        ) : (
-                          <span className="text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
-                            <Sparkles className="w-3 h-3" /> Excelente (&lt;25%)
+                        {t.diaVencimiento && (
+                          <span className="text-[10px] bg-slate-700 text-slate-200 px-2 py-0.5 rounded">
+                            Vence día {t.diaVencimiento}
                           </span>
                         )}
                       </div>
 
                       <h4 className={`font-bold text-lg mb-1 ${darkMode ? 'text-slate-100' : 'text-slate-800'}`}>{t.nombre}</h4>
-                      {t.diaVencimiento && (
-                        <p className="text-xs text-slate-400 mb-3">Vence el día: <strong className={darkMode ? 'text-slate-200' : 'text-slate-700'}>{t.diaVencimiento}</strong> de cada mes</p>
-                      )}
 
-                      <div className="space-y-1 text-xs mb-3">
+                      <div className="space-y-1 text-xs my-3">
                         <div className="flex justify-between text-slate-400">
-                          <span>Deuda actual:</span>
-                          <span className="font-bold text-rose-500 text-sm">{formatoMoneda(deudaNum, t.moneda || 'PEN')}</span>
+                          <span>Deuda Actual:</span>
+                          <span className="font-bold text-rose-500">{formatoMoneda(t.deudaActual || 0, t.moneda || 'PEN')}</span>
                         </div>
                         <div className="flex justify-between text-slate-400">
-                          <span>Límite asignado:</span>
-                          <span>{formatoMoneda(limiteNum, t.moneda || 'PEN')}</span>
-                        </div>
-                        <div className="flex justify-between text-slate-400">
-                          <span>Disponible:</span>
-                          <span className="font-bold text-emerald-400">{formatoMoneda(disponible, t.moneda || 'PEN')}</span>
+                          <span>Límite Total:</span>
+                          <span>{formatoMoneda(t.limite || 0, t.moneda || 'PEN')}</span>
                         </div>
                       </div>
 
-                      <div className={`w-full h-2.5 rounded-full overflow-hidden mb-1.5 ${darkMode ? 'bg-slate-700' : 'bg-slate-200'}`}>
+                      <div className={`w-full h-2 rounded-full overflow-hidden mb-1.5 ${darkMode ? 'bg-slate-700' : 'bg-slate-200'}`}>
                         <div 
-                          className={`h-full transition-all ${sobregirada ? 'bg-rose-500' : precaucion ? 'bg-amber-500' : cuidado ? 'bg-yellow-500' : 'bg-emerald-500'}`}
-                          style={{ width: `${Math.min(100, porcentajeUso)}%` }}
+                          className={`h-full transition-all ${porcentajeUso > 80 ? 'bg-rose-500' : 'bg-purple-500'}`}
+                          style={{ width: `${porcentajeUso}%` }}
                         ></div>
                       </div>
-                      <div className="flex justify-between text-[11px] font-bold">
-                        <span className="text-slate-400">Utilización:</span>
-                        <span className={sobregirada ? 'text-rose-400' : precaucion ? 'text-amber-400' : cuidado ? 'text-yellow-400' : 'text-emerald-400'}>
-                          {porcentajeUso}% usado
-                        </span>
+
+                      <div className="flex justify-between items-center text-[11px]">
+                        <span className="text-slate-400">Disponible: <strong className="text-emerald-400">{formatoMoneda(disponible, t.moneda || 'PEN')}</strong></span>
+                        <span className="font-semibold text-slate-400">{porcentajeUso}% usado</span>
                       </div>
                     </div>
                   );
                 })}
               </div>
             )}
+
+            {/* LISTADO DE COMPRAS EN CUOTAS */}
+            <div className="pt-4 border-t border-slate-700/50 space-y-3">
+              <h4 className={`font-bold text-sm flex items-center gap-2 ${darkMode ? 'text-slate-200' : 'text-slate-800'}`}>
+                <Clock className="w-4 h-4 text-indigo-400" />
+                Consumos Fraccionados en Cuotas ({cuotasTarjetas.length})
+              </h4>
+
+              {cuotasTarjetas.length === 0 ? (
+                <p className="text-xs text-slate-400">No tienes compras en cuotas registradas actualmente.</p>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {cuotasTarjetas.map(c => (
+                    <div key={c.id} className={`p-4 rounded-xl border relative group ${darkMode ? 'bg-slate-800/60 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                      <button
+                        onClick={() => eliminarCompraCuotas(c.id)}
+                        className="absolute top-3 right-3 text-slate-400 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                        title="Eliminar registro de cuotas"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-[10px] bg-indigo-500/20 text-indigo-300 font-bold px-2 py-0.5 rounded">
+                          {c.tarjetaNombre}
+                        </span>
+                        <span className="text-[10px] bg-slate-700 text-slate-300 px-2 py-0.5 rounded font-mono">
+                          Cuota {c.cuotaActual} de {c.totalCuotas}
+                        </span>
+                      </div>
+
+                      <h5 className={`font-bold text-sm mb-1 ${darkMode ? 'text-slate-100' : 'text-slate-800'}`}>{c.concepto}</h5>
+
+                      <div className="flex justify-between items-end mt-2 pt-2 border-t border-slate-700/40 text-xs">
+                        <div>
+                          <span className="text-slate-400 block text-[10px]">Valor Cuota Mensual:</span>
+                          <strong className="text-indigo-400 text-sm font-black">{formatoMoneda(c.valorCuotaMensual, c.moneda)}</strong>
+                        </div>
+                        <span className="text-slate-400 text-[10px] font-mono">
+                          Total: {formatoMoneda(c.montoTotal, c.moneda)}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </section>
         )}
 
@@ -2417,6 +2356,7 @@ export default function App() {
                   <button
                     onClick={() => {
                       if (cuentasBancarias.length > 0) setCuentaOrigenAbonoPrestamoId(cuentasBancarias[0].id);
+                      setPrestamoSeleccionadoId(prestamos[0].id);
                       setMostrarModalAbonoPrestamo(true);
                     }}
                     className="bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 px-3 py-1.5 rounded-xl font-semibold text-xs flex items-center gap-1 border border-amber-500/30 transition-colors"
@@ -2899,9 +2839,10 @@ export default function App() {
                   onChange={(e) => setMoneda(e.target.value)}
                   className={`px-3 py-1.5 rounded-xl text-sm font-semibold border focus:outline-none focus:ring-2 focus:ring-indigo-500 ${darkMode ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
                 >
-                  <option value="PEN" className="bg-slate-800 text-white">PEN (S/)</option>
-                  <option value="USD" className="bg-slate-800 text-white">USD ($)</option>
-                  <option value="EUR" className="bg-slate-800 text-white">EUR (€)</option>
+                  <option value="CLP" className="bg-slate-800 text-white">CLP ($ Pesos Chilenos)</option>
+                  <option value="PEN" className="bg-slate-800 text-white">PEN (S/ Soles)</option>
+                  <option value="USD" className="bg-slate-800 text-white">USD ($ Dólares)</option>
+                  <option value="EUR" className="bg-slate-800 text-white">EUR (€ Euros)</option>
                 </select>
               </div>
 
@@ -2999,7 +2940,7 @@ export default function App() {
               </div>
 
               <div className="border-t pt-3 border-slate-700">
-                <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Presupuesto por Categoría Especifica</label>
+                <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Presupuesto por Categoría Específica</label>
                 <select
                   value={categoriaPresupuesto}
                   onChange={(e) => setCategoriaPresupuesto(e.target.value)}
@@ -3128,7 +3069,7 @@ export default function App() {
                 <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Nota Opcional / Detalles Libres</label>
                 <input
                   type="text"
-                  placeholder="Ej: Cena con compañeros de UNI, Mantenimiento PC..."
+                  placeholder="Ej: Cena con compañeros de trabajo, Mantenimiento PC..."
                   value={notaForm}
                   onChange={(e) => setNotaForm(e.target.value)}
                   className={`w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500' : 'bg-white border-slate-200 text-slate-800'}`}
@@ -3245,6 +3186,486 @@ export default function App() {
         </div>
       )}
 
+      {/* MODAL TRANSFERENCIA ENTRE CUENTAS */}
+      {mostrarModalTransferencia && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className={`rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4 ${darkMode ? 'bg-slate-900 border border-slate-800 text-white' : 'bg-white text-slate-800'}`}>
+            <h3 className={`text-xl font-bold flex items-center gap-2 ${darkMode ? 'text-white' : 'text-slate-800'}`}>
+              <ArrowRightLeft className="w-5 h-5 text-indigo-500" />
+              Transferir entre Cuentas / Billeteras
+            </h3>
+            
+            <form onSubmit={realizarTransferencia} className="space-y-4">
+              <div>
+                <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Cuenta Origen (Sale dinero)</label>
+                <select
+                  value={cuentaOrigenId}
+                  onChange={(e) => setCuentaOrigenId(e.target.value)}
+                  className={`w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
+                >
+                  {cuentasConSaldosActuales.map(c => (
+                    <option key={c.id} value={c.id} className="bg-slate-800 text-white">
+                      {c.nombre} (Saldo: {formatoMoneda(c.saldoActual, c.moneda)})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Cuenta Destino (Ingresa dinero)</label>
+                <select
+                  value={cuentaDestinoId}
+                  onChange={(e) => setCuentaDestinoId(e.target.value)}
+                  className={`w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
+                >
+                  {cuentasConSaldosActuales.map(c => (
+                    <option key={c.id} value={c.id} className="bg-slate-800 text-white">
+                      {c.nombre} (Saldo: {formatoMoneda(c.saldoActual, c.moneda)})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Monto a Transferir</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  required
+                  placeholder="0.00"
+                  value={montoTransferenciaForm}
+                  onChange={(e) => setMontoTransferenciaForm(e.target.value)}
+                  className={`w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500' : 'bg-white border-slate-200 text-slate-800'}`}
+                />
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setMostrarModalTransferencia(false)}
+                  className={`flex-1 py-2.5 border rounded-xl font-semibold text-sm transition-colors ${darkMode ? 'border-slate-700 text-slate-300 hover:bg-slate-800' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={cuentaOrigenId === cuentaDestinoId}
+                  className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl font-semibold text-sm shadow-sm"
+                >
+                  Transferir
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL PAGO DE TARJETA */}
+      {mostrarModalPagoTarjeta && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className={`rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4 ${darkMode ? 'bg-slate-900 border border-slate-800 text-white' : 'bg-white text-slate-800'}`}>
+            <h3 className={`text-xl font-bold flex items-center gap-2 ${darkMode ? 'text-white' : 'text-slate-800'}`}>
+              <CreditCard className="w-5 h-5 text-purple-500" />
+              Pagar Tarjeta de Crédito
+            </h3>
+            
+            <form onSubmit={registrarPagoTarjeta} className="space-y-4">
+              <div>
+                <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Tarjeta a Pagar</label>
+                <select
+                  value={tarjetaAPagarId}
+                  onChange={(e) => setTarjetaAPagarId(e.target.value)}
+                  className={`w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
+                >
+                  {tarjetas.map(t => (
+                    <option key={t.id} value={t.id} className="bg-slate-800 text-white">
+                      {t.nombre} (Deuda: {formatoMoneda(t.deudaActual, t.moneda)})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Cuenta Origen del Pago</label>
+                <select
+                  value={cuentaOrigenPagoTarjetaId}
+                  onChange={(e) => setCuentaOrigenPagoTarjetaId(e.target.value)}
+                  className={`w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
+                >
+                  {cuentasConSaldosActuales.map(c => (
+                    <option key={c.id} value={c.id} className="bg-slate-800 text-white">
+                      {c.nombre} (Saldo: {formatoMoneda(c.saldoActual, c.moneda)})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Monto a Pagar</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  required
+                  placeholder="0.00"
+                  value={montoPagoTarjetaForm}
+                  onChange={(e) => setMontoPagoTarjetaForm(e.target.value)}
+                  className={`w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500' : 'bg-white border-slate-200 text-slate-800'}`}
+                />
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setMostrarModalPagoTarjeta(false)}
+                  className={`flex-1 py-2.5 border rounded-xl font-semibold text-sm transition-colors ${darkMode ? 'border-slate-700 text-slate-300 hover:bg-slate-800' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 bg-purple-600 text-white rounded-xl font-semibold hover:bg-purple-700 text-sm shadow-sm"
+                >
+                  Confirmar Pago
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL NUEVA COMPRA EN CUOTAS */}
+      {mostrarModalCuotaTarjeta && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className={`rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4 ${darkMode ? 'bg-slate-900 border border-slate-800 text-white' : 'bg-white text-slate-800'}`}>
+            <h3 className={`text-xl font-bold flex items-center gap-2 ${darkMode ? 'text-white' : 'text-slate-800'}`}>
+              <CreditCard className="w-5 h-5 text-indigo-500" />
+              Registrar Compra en Cuotas
+            </h3>
+            
+            <form onSubmit={guardarCompraCuotas} className="space-y-4">
+              <div>
+                <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Tarjeta de Crédito</label>
+                <select
+                  value={tarjetaCuotaId}
+                  onChange={(e) => setTarjetaCuotaId(e.target.value)}
+                  className={`w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
+                >
+                  {tarjetas.map(t => (
+                    <option key={t.id} value={t.id} className="bg-slate-800 text-white">
+                      {t.nombre} ({t.moneda || 'PEN'})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Concepto / Producto</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ej: Laptop nueva, Electrodoméstico..."
+                  value={conceptoCuotaForm}
+                  onChange={(e) => setConceptoCuotaForm(e.target.value)}
+                  className={`w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500' : 'bg-white border-slate-200 text-slate-800'}`}
+                />
+              </div>
+
+              <div>
+                <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Monto Total de la Compra</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  required
+                  placeholder="0.00"
+                  value={montoTotalCuotaForm}
+                  onChange={(e) => setMontoTotalCuotaForm(e.target.value)}
+                  className={`w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500' : 'bg-white border-slate-200 text-slate-800'}`}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Número Total de Cuotas</label>
+                  <input
+                    type="number"
+                    min="2"
+                    max="48"
+                    required
+                    value={numCuotasForm}
+                    onChange={(e) => setNumCuotasForm(e.target.value)}
+                    className={`w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
+                  />
+                </div>
+
+                <div>
+                  <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Cuota Actual</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="48"
+                    required
+                    value={cuotaActualForm}
+                    onChange={(e) => setCuotaActualForm(e.target.value)}
+                    className={`w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
+                  />
+                </div>
+              </div>
+
+              {montoTotalCuotaForm && numCuotasForm && (
+                <div className="p-3 bg-indigo-500/10 border border-indigo-500/20 rounded-xl text-xs text-indigo-400 flex justify-between items-center">
+                  <span>Valor de cada cuota mensual:</span>
+                  <strong className="font-bold text-sm">{formatoMoneda(parseFloat(montoTotalCuotaForm || 0) / parseInt(numCuotasForm || 1, 10))}</strong>
+                </div>
+              )}
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setMostrarModalCuotaTarjeta(false)}
+                  className={`flex-1 py-2.5 border rounded-xl font-semibold text-sm transition-colors ${darkMode ? 'border-slate-700 text-slate-300 hover:bg-slate-800' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 bg-indigo-600 text-white rounded-xl font-semibold hover:bg-indigo-700 text-sm shadow-sm"
+                >
+                  Guardar Cuotas
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL TARJETA NUEVA */}
+      {mostrarModalTarjeta && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className={`rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4 ${darkMode ? 'bg-slate-900 border border-slate-800 text-white' : 'bg-white text-slate-800'}`}>
+            <h3 className={`text-xl font-bold flex items-center gap-2 ${darkMode ? 'text-white' : 'text-slate-800'}`}>
+              <CreditCard className="w-5 h-5 text-purple-500" />
+              {tarjetaEditandoId ? 'Editar Tarjeta de Crédito' : 'Nueva Tarjeta de Crédito'}
+            </h3>
+            
+            <form onSubmit={guardarTarjeta} className="space-y-4">
+              <div>
+                <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Nombre de la Tarjeta</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ej: BCP Visa Signature..."
+                  value={nombreTarjetaForm}
+                  onChange={(e) => setNombreTarjetaForm(e.target.value)}
+                  className={`w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500' : 'bg-white border-slate-200 text-slate-800'}`}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Límite de Crédito</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    required
+                    placeholder="Ej: 5000"
+                    value={limiteTarjetaForm}
+                    onChange={(e) => setLimiteTarjetaForm(e.target.value)}
+                    className={`w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500' : 'bg-white border-slate-200 text-slate-800'}`}
+                  />
+                </div>
+
+                <div>
+                  <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Moneda</label>
+                  <select
+                    value={monedaTarjetaForm}
+                    onChange={(e) => setMonedaTarjetaForm(e.target.value)}
+                    className={`w-full px-2 py-2 border rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-sm font-bold ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
+                  >
+                    <option value="PEN">PEN (S/)</option>
+                    <option value="USD">USD ($)</option>
+                    <option value="EUR">EUR (€)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Día de Vencimiento (1-31)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="31"
+                    placeholder="Ej: 15"
+                    value={diaVencimientoTarjetaForm}
+                    onChange={(e) => setDiaVencimientoTarjetaForm(e.target.value)}
+                    className={`w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500' : 'bg-white border-slate-200 text-slate-800'}`}
+                  />
+                </div>
+
+                {!tarjetaEditandoId && (
+                  <div>
+                    <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Deuda Inicial (Opcional)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      placeholder="0.00"
+                      value={deudaInicialTarjetaForm}
+                      onChange={(e) => setDeudaInicialTarjetaForm(e.target.value)}
+                      className={`w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500' : 'bg-white border-slate-200 text-slate-800'}`}
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setMostrarModalTarjeta(false)}
+                  className={`flex-1 py-2.5 border rounded-xl font-semibold text-sm transition-colors ${darkMode ? 'border-slate-700 text-slate-300 hover:bg-slate-800' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 bg-purple-600 text-white rounded-xl font-semibold hover:bg-purple-700 text-sm shadow-sm"
+                >
+                  {tarjetaEditandoId ? 'Guardar Cambios' : 'Guardar Tarjeta'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL RECURRENTE NUEVO */}
+      {mostrarModalRecurrente && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className={`rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4 ${darkMode ? 'bg-slate-900 border border-slate-800 text-white' : 'bg-white text-slate-800'}`}>
+            <h3 className={`text-xl font-bold flex items-center gap-2 ${darkMode ? 'text-white' : 'text-slate-800'}`}>
+              <Repeat className="w-5 h-5 text-purple-500" />
+              Nuevo Movimiento Recurrente
+            </h3>
+            
+            <form onSubmit={guardarRecurrente} className="space-y-4">
+              <div className={`flex p-1 rounded-xl ${darkMode ? 'bg-slate-800' : 'bg-slate-100'}`}>
+                <button
+                  type="button"
+                  onClick={() => setTipoRecurrenteForm('gasto')}
+                  className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all ${tipoRecurrenteForm === 'gasto' ? (darkMode ? 'bg-slate-700 text-rose-400 shadow' : 'bg-white shadow text-rose-600') : 'text-slate-400'}`}
+                >
+                  Gasto Fijo
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTipoRecurrenteForm('ingreso')}
+                  className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all ${tipoRecurrenteForm === 'ingreso' ? (darkMode ? 'bg-slate-700 text-emerald-400 shadow' : 'bg-white shadow text-emerald-600') : 'text-slate-400'}`}
+                >
+                  Ingreso Fijo
+                </button>
+              </div>
+
+              <div>
+                <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Descripción</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ej: Alquiler, Netflix, Sueldo..."
+                  value={descRecurrenteForm}
+                  onChange={(e) => setDescRecurrenteForm(e.target.value)}
+                  className={`w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500' : 'bg-white border-slate-200 text-slate-800'}`}
+                />
+              </div>
+
+              <div className="grid grid-cols-3 gap-2">
+                <div className="col-span-2">
+                  <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Monto Fijo</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    required
+                    placeholder="0.00"
+                    value={montoRecurrenteForm}
+                    onChange={(e) => setMontoRecurrenteForm(e.target.value)}
+                    className={`w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500' : 'bg-white border-slate-200 text-slate-800'}`}
+                  />
+                </div>
+                <div>
+                  <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Moneda</label>
+                  <select
+                    value={monedaRecurrenteForm}
+                    onChange={(e) => setMonedaRecurrenteForm(e.target.value)}
+                    className={`w-full px-2 py-2 border rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-sm font-bold ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
+                  >
+                    <option value="PEN">PEN</option>
+                    <option value="USD">USD</option>
+                    <option value="EUR">EUR</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Día del Mes (1-31)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="31"
+                    required
+                    value={diaPagoRecurrenteForm}
+                    onChange={(e) => setDiaPagoRecurrenteForm(e.target.value)}
+                    className={`w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
+                  />
+                </div>
+
+                <div>
+                  <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Categoría</label>
+                  <select
+                    value={categoriaRecurrenteForm}
+                    onChange={(e) => setCategoriaRecurrenteForm(e.target.value)}
+                    className={`w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
+                  >
+                    {(tipoRecurrenteForm === 'gasto' ? catGastosPers : catIngresosPers).map(cat => (
+                      <option key={cat} value={cat} className="bg-slate-800 text-white">{cat}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Cuenta Imputada</label>
+                <select
+                  value={cuentaRecurrenteId}
+                  onChange={(e) => setCuentaRecurrenteId(e.target.value)}
+                  className={`w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
+                >
+                  {cuentasConSaldosActuales.map(c => (
+                    <option key={c.id} value={c.id} className="bg-slate-800 text-white">
+                      {c.nombre} ({c.moneda})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setMostrarModalRecurrente(false)}
+                  className={`flex-1 py-2.5 border rounded-xl font-semibold text-sm transition-colors ${darkMode ? 'border-slate-700 text-slate-300 hover:bg-slate-800' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 bg-purple-600 text-white rounded-xl font-semibold hover:bg-purple-700 text-sm shadow-sm"
+                >
+                  Guardar Recurrencia
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* MODAL CIERRE DE MES */}
       {mostrarModalCierre && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
@@ -3305,227 +3726,6 @@ export default function App() {
         </div>
       )}
 
-      {/* MODALS RESTANTES (CUENTA, TARJETA, PRÉSTAMO, RECURRENTE, META, DATOS) */}
-      {mostrarModalCuenta && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className={`rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4 ${darkMode ? 'bg-slate-900 border border-slate-800 text-white' : 'bg-white text-slate-800'}`}>
-            <h3 className={`text-xl font-bold flex items-center gap-2 ${darkMode ? 'text-white' : 'text-slate-800'}`}>
-              <Building2 className="w-5 h-5 text-blue-500" />
-              {cuentaEditandoId ? 'Editar Cuenta / Billetera' : 'Nueva Cuenta o Billetera'}
-            </h3>
-            
-            <form onSubmit={guardarCuenta} className="space-y-4">
-              <div>
-                <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Nombre de la Cuenta</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Ej: BCP Débito, Yape, Plin, Efectivo..."
-                  value={nombreCuentaForm}
-                  onChange={(e) => setNombreCuentaForm(e.target.value)}
-                  className={`w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500' : 'bg-white border-slate-200 text-slate-800'}`}
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Tipo</label>
-                  <select
-                    value={tipoCuentaForm}
-                    onChange={(e) => setTipoCuentaForm(e.target.value)}
-                    className={`w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
-                  >
-                    <option value="Bancaria">Bancaria / Débito</option>
-                    <option value="Billetera Digital">Billetera Digital (Yape / Plin)</option>
-                    <option value="Ahorros">Cuenta de Ahorros</option>
-                    <option value="Efectivo">Efectivo Físico</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Moneda</label>
-                  <select
-                    value={monedaCuentaForm}
-                    onChange={(e) => setMonedaCuentaForm(e.target.value)}
-                    className={`w-full px-2 py-2 border rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm font-bold ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
-                  >
-                    <option value="PEN">PEN (S/)</option>
-                    <option value="USD">USD ($)</option>
-                    <option value="EUR">EUR (€)</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Saldo Inicial de Apertura</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  required
-                  placeholder="0.00"
-                  value={saldoInicialCuentaForm}
-                  onChange={(e) => setSaldoInicialCuentaForm(e.target.value)}
-                  className={`w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500' : 'bg-white border-slate-200 text-slate-800'}`}
-                />
-              </div>
-
-              <div className="flex gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setMostrarModalCuenta(false)}
-                  className={`flex-1 py-2.5 border rounded-xl font-semibold text-sm transition-colors ${darkMode ? 'border-slate-700 text-slate-300 hover:bg-slate-800' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 py-2.5 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 text-sm shadow-sm"
-                >
-                  {cuentaEditandoId ? 'Guardar Cambios' : 'Crear Cuenta'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL CREAR PRÉSTAMO CON SOPORTE INFORMAL */}
-      {mostrarModalPrestamo && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className={`rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4 ${darkMode ? 'bg-slate-900 border border-slate-800 text-white' : 'bg-white text-slate-800'}`}>
-            <h3 className={`text-xl font-bold flex items-center gap-2 ${darkMode ? 'text-white' : 'text-slate-800'}`}>
-              <HandCoins className="w-5 h-5 text-amber-600" />
-              Nuevo Préstamo / Deuda entre Personas
-            </h3>
-            
-            <form onSubmit={guardarPrestamo} className="space-y-4">
-              <div className={`flex p-1 rounded-xl ${darkMode ? 'bg-slate-800' : 'bg-slate-100'}`}>
-                <button
-                  type="button"
-                  onClick={() => setTipoPrestamoForm('tomado')}
-                  className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all ${tipoPrestamoForm === 'tomado' ? (darkMode ? 'bg-slate-700 text-rose-400 shadow' : 'bg-white shadow text-rose-600') : 'text-slate-400'}`}
-                >
-                  Me prestaron (Debo dinero)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setTipoPrestamoForm('otorgado')}
-                  className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all ${tipoPrestamoForm === 'otorgado' ? (darkMode ? 'bg-slate-700 text-emerald-400 shadow' : 'bg-white shadow text-emerald-600') : 'text-slate-400'}`}
-                >
-                  Presté a alguien (Por cobrar)
-                </button>
-              </div>
-
-              <div className={`p-3 rounded-xl border flex items-center justify-between ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
-                <div className="flex items-center gap-2">
-                  <Users className="w-4 h-4 text-purple-400" />
-                  <span className="text-xs font-semibold">¿Es un préstamo informal / entre amigos?</span>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={esInformalForm}
-                  onChange={(e) => setEsInformalForm(e.target.checked)}
-                  className="w-4 h-4 accent-indigo-600"
-                />
-              </div>
-
-              <div>
-                <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Concepto / Motivo</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Ej: Almuerzo UNI, Cuota regalo, Préstamo BCP..."
-                  value={nombrePrestamoForm}
-                  onChange={(e) => setNombrePrestamoForm(e.target.value)}
-                  className={`w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-amber-500 outline-none text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500' : 'bg-white border-slate-200 text-slate-800'}`}
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Persona / Entidad</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="Ej: Juan Pérez, Carlos..."
-                    value={prestamistaForm}
-                    onChange={(e) => setPrestamistaForm(e.target.value)}
-                    className={`w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-amber-500 outline-none text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500' : 'bg-white border-slate-200 text-slate-800'}`}
-                  />
-                </div>
-
-                <div>
-                  <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Teléfono (Opcional)</label>
-                  <input
-                    type="tel"
-                    placeholder="Ej: 987654321"
-                    value={telefonoContactoForm}
-                    onChange={(e) => setTelefonoContactoForm(e.target.value)}
-                    className={`w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-amber-500 outline-none text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500' : 'bg-white border-slate-200 text-slate-800'}`}
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-3 gap-2">
-                <div className="col-span-2">
-                  <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Monto Original</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    required
-                    placeholder="Ej: 50.00"
-                    value={montoTotalPrestamoForm}
-                    onChange={(e) => setMontoTotalPrestamoForm(e.target.value)}
-                    className={`w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-amber-500 outline-none text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500' : 'bg-white border-slate-200 text-slate-800'}`}
-                  />
-                </div>
-                <div>
-                  <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Moneda</label>
-                  <select
-                    value={monedaPrestamoForm}
-                    onChange={(e) => setMonedaPrestamoForm(e.target.value)}
-                    className={`w-full px-2 py-2 border rounded-xl focus:ring-2 focus:ring-amber-500 outline-none text-sm font-bold ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
-                  >
-                    <option value="PEN" className="bg-slate-800 text-white">PEN</option>
-                    <option value="USD" className="bg-slate-800 text-white">USD</option>
-                    <option value="EUR" className="bg-slate-800 text-white">EUR</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Día de Vencimiento / Acordado (Opcional)</label>
-                <input
-                  type="number"
-                  min="1"
-                  max="31"
-                  placeholder="Ej: 15"
-                  value={diaVencimientoPrestamoForm}
-                  onChange={(e) => setDiaVencimientoPrestamoForm(e.target.value)}
-                  className={`w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-amber-500 outline-none text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500' : 'bg-white border-slate-200 text-slate-800'}`}
-                />
-              </div>
-
-              <div className="flex gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setMostrarModalPrestamo(false)}
-                  className={`flex-1 py-2.5 border rounded-xl font-semibold text-sm transition-colors ${darkMode ? 'border-slate-700 text-slate-300 hover:bg-slate-800' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 py-2.5 bg-amber-600 text-white rounded-xl font-semibold hover:bg-amber-700 text-sm shadow-sm"
-                >
-                  Guardar Préstamo
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
       {/* MODAL INFORMACIÓN Y HISTORIAL DE CIERRES */}
       {mostrarModalInfoData && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
@@ -3542,6 +3742,12 @@ export default function App() {
                 ✕
               </button>
             </div>
+
+            {mensajeRespaldo && (
+              <div className={`p-3 rounded-xl text-xs font-semibold ${mensajeRespaldo.tipo === 'ok' ? 'bg-emerald-50 text-emerald-600 border border-emerald-200' : 'bg-rose-50 text-rose-600 border border-rose-200'}`}>
+                {mensajeRespaldo.texto}
+              </div>
+            )}
 
             <div className="space-y-4 text-sm text-slate-400">
               <div className={`p-3 border rounded-xl flex items-start gap-3 ${darkMode ? 'bg-indigo-950/40 border-indigo-900/50 text-indigo-200' : 'bg-indigo-50 border-indigo-100 text-indigo-950'}`}>
@@ -3604,6 +3810,123 @@ export default function App() {
             >
               Cerrar
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL NUEVA/EDITAR CUENTA */}
+      {mostrarModalCuenta && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className={`rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4 ${darkMode ? 'bg-slate-900 border border-slate-800 text-white' : 'bg-white text-slate-800'}`}>
+            <h3 className={`text-xl font-bold flex items-center gap-2 ${darkMode ? 'text-white' : 'text-slate-800'}`}>
+              <Building2 className="w-5 h-5 text-blue-500" />
+              {cuentaEditandoId ? 'Editar Cuenta o Billetera' : 'Nueva Cuenta / Billetera Digital'}
+            </h3>
+            
+            <form onSubmit={guardarCuenta} className="space-y-4">
+              <div>
+                <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Nombre de la Cuenta / Billetera</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ej: BCP Débito, Yape, BBVA..."
+                  value={nombreCuentaForm}
+                  onChange={(e) => setNombreCuentaForm(e.target.value)}
+                  className={`w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500' : 'bg-white border-slate-200 text-slate-800'}`}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Tipo</label>
+                  <select
+                    value={tipoCuentaForm}
+                    onChange={(e) => setTipoCuentaForm(e.target.value)}
+                    className={`w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
+                  >
+                    <option value="Bancaria">Bancaria</option>
+                    <option value="Billetera Digital">Billetera Digital</option>
+                    <option value="Efectivo">Efectivo</option>
+                    <option value="Ahorros">Ahorros</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Moneda</label>
+                  <select
+                    value={monedaCuentaForm}
+                    onChange={(e) => setMonedaCuentaForm(e.target.value)}
+                    className={`w-full px-2 py-2 border rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm font-bold ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
+                  >
+                    <option value="PEN">PEN (S/)</option>
+                    <option value="USD">USD ($)</option>
+                    <option value="EUR">EUR (€)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Saldo Inicial</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    required
+                    placeholder="0.00"
+                    value={saldoInicialCuentaForm}
+                    onChange={(e) => setSaldoInicialCuentaForm(e.target.value)}
+                    className={`w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500' : 'bg-white border-slate-200 text-slate-800'}`}
+                  />
+                </div>
+
+                <div>
+                  <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Color Indicador</label>
+                  <input
+                    type="color"
+                    value={colorCuentaForm}
+                    onChange={(e) => setColorCuentaForm(e.target.value)}
+                    className="w-full h-10 px-1 py-1 border rounded-xl cursor-pointer bg-transparent"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Vincular con otra Cuenta (Bolsa de fondos compartida)</label>
+                <select
+                  value={cuentaVinculadaIdForm}
+                  onChange={(e) => setCuentaVinculadaIdForm(e.target.value)}
+                  className={`w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
+                >
+                  <option value="">-- Sin vinculación (Independiente) --</option>
+                  {cuentasBancarias
+                    .filter(c => c.id !== cuentaEditandoId)
+                    .map(c => (
+                      <option key={c.id} value={c.id}>
+                        Vincular a: {c.nombre} ({c.tipo})
+                      </option>
+                    ))}
+                </select>
+                <p className="text-[10px] text-slate-400 mt-1">
+                  💡 Al vincular por ejemplo Yape a BCP, ambos compartirán exactamente el mismo saldo y bolsa de fondos.
+                </p>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setMostrarModalCuenta(false)}
+                  className={`flex-1 py-2.5 border rounded-xl font-semibold text-sm transition-colors ${darkMode ? 'border-slate-700 text-slate-300 hover:bg-slate-800' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 text-sm shadow-sm"
+                >
+                  Guardar Cuenta
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
