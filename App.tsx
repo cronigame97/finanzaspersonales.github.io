@@ -45,7 +45,9 @@ import {
   History,
   MessageCircle,
   Send,
-  Users
+  Users,
+  FileText,
+  Printer
 } from 'lucide-react';
 import { 
   PieChart, 
@@ -116,7 +118,248 @@ const leerJSON = (clave, porDefecto) => {
   }
 };
 
-export default function App() {
+// Helpers de validación y saneamiento para evitar corrupción de estado o pantallas en blanco
+const MONEDAS_VALIDAS = ['PEN', 'USD', 'EUR', 'CLP'];
+const TIPOS_CAMBIO_DEFECTO = { USD_PEN: 3.75, EUR_PEN: 4.10, CLP_PEN: 0.0041, USD_CLP: 920, EUR_CLP: 1000 };
+
+const esObjetoPlano = (val) => val !== null && typeof val === 'object' && !Array.isArray(val);
+
+const sanearArrayObjetos = (arr, mapearItem) => {
+  if (!Array.isArray(arr)) return null;
+  return arr
+    .filter((item) => esObjetoPlano(item))
+    .map((item, idx) => mapearItem(item, idx));
+};
+
+const sanearArrayStrings = (arr) => {
+  if (!Array.isArray(arr)) return null;
+  return arr.filter((item) => typeof item === 'string' && item.trim().length > 0).map((s) => s.trim());
+};
+
+const sanearTransaccion = (t, idx) => ({
+  ...t,
+  id: typeof t.id === 'string' && t.id ? t.id : `trans_imp_${Date.now()}_${idx}`,
+  tipo: ['ingreso', 'gasto', 'pago_tarjeta', 'pago_prestamo', 'transferencia_salida', 'transferencia_entrada'].includes(t.tipo) ? t.tipo : 'gasto',
+  monto: Number.isFinite(Number(t.monto)) ? Number(t.monto) : 0,
+  descripcion: typeof t.descripcion === 'string' ? t.descripcion : 'Movimiento',
+  nota: typeof t.nota === 'string' ? t.nota : '',
+  categoria: typeof t.categoria === 'string' && t.categoria ? t.categoria : 'Otros Gastos',
+  fecha: typeof t.fecha === 'string' && /^\d{4}-\d{2}-\d{2}/.test(t.fecha) ? t.fecha.slice(0, 10) : new Date().toISOString().slice(0, 10),
+  moneda: MONEDAS_VALIDAS.includes(t.moneda) ? t.moneda : 'PEN',
+  esCredito: Boolean(t.esCredito),
+  metodo: typeof t.metodo === 'string' ? t.metodo : 'General'
+});
+
+const sanearCuenta = (c, idx) => ({
+  ...c,
+  id: typeof c.id === 'string' && c.id ? c.id : `cta_imp_${Date.now()}_${idx}`,
+  nombre: typeof c.nombre === 'string' && c.nombre ? c.nombre : `Cuenta ${idx + 1}`,
+  tipo: typeof c.tipo === 'string' && c.tipo ? c.tipo : 'Bancaria',
+  moneda: MONEDAS_VALIDAS.includes(c.moneda) ? c.moneda : 'PEN',
+  saldoInicial: Number.isFinite(Number(c.saldoInicial)) ? Number(c.saldoInicial) : 0,
+  color: typeof c.color === 'string' ? c.color : '#6366F1',
+  cuentaVinculadaId: typeof c.cuentaVinculadaId === 'string' ? c.cuentaVinculadaId : null
+});
+
+const sanearTarjeta = (t, idx) => ({
+  ...t,
+  id: typeof t.id === 'string' && t.id ? t.id : `tarj_imp_${Date.now()}_${idx}`,
+  nombre: typeof t.nombre === 'string' && t.nombre ? t.nombre : `Tarjeta ${idx + 1}`,
+  limite: Number.isFinite(Number(t.limite)) ? Math.max(0, Number(t.limite)) : 0,
+  deudaActual: Number.isFinite(Number(t.deudaActual)) ? Math.max(0, Number(t.deudaActual)) : 0,
+  diaCorte: Number.isFinite(Number(t.diaCorte)) ? Number(t.diaCorte) : null,
+  diaVencimiento: Number.isFinite(Number(t.diaVencimiento)) ? Number(t.diaVencimiento) : null,
+  moneda: MONEDAS_VALIDAS.includes(t.moneda) ? t.moneda : 'PEN'
+});
+
+const sanearCuotaTarjeta = (c, idx) => {
+  const totalCuotas = Math.max(1, parseInt(c.totalCuotas, 10) || 1);
+  const cuotaActual = Math.min(totalCuotas, Math.max(1, parseInt(c.cuotaActual, 10) || 1));
+  const montoTotal = Number.isFinite(Number(c.montoTotal)) ? Math.max(0, Number(c.montoTotal)) : 0;
+  const valorCuotaMensual = Number.isFinite(Number(c.valorCuotaMensual)) ? Number(c.valorCuotaMensual) : montoTotal / totalCuotas;
+  return {
+    ...c,
+    id: typeof c.id === 'string' && c.id ? c.id : `cuota_imp_${Date.now()}_${idx}`,
+    tarjetaId: typeof c.tarjetaId === 'string' ? c.tarjetaId : '',
+    tarjetaNombre: typeof c.tarjetaNombre === 'string' ? c.tarjetaNombre : 'Tarjeta',
+    concepto: typeof c.concepto === 'string' && c.concepto ? c.concepto : 'Compra en cuotas',
+    categoria: typeof c.categoria === 'string' && c.categoria ? c.categoria : 'Compras',
+    montoTotal,
+    valorCuotaMensual,
+    saldoPendiente: Number.isFinite(Number(c.saldoPendiente)) ? Math.max(0, Number(c.saldoPendiente)) : 0,
+    montoPagado: Number.isFinite(Number(c.montoPagado)) ? Math.max(0, Number(c.montoPagado)) : 0,
+    cuotasPagadas: Number.isFinite(Number(c.cuotasPagadas)) ? Math.max(0, Number(c.cuotasPagadas)) : 0,
+    totalCuotas,
+    cuotaInicial: Math.min(totalCuotas, Math.max(1, parseInt(c.cuotaInicial, 10) || cuotaActual)),
+    cuotaActual,
+    cuotasGeneradas: Array.isArray(c.cuotasGeneradas) ? c.cuotasGeneradas : [cuotaActual],
+    moneda: MONEDAS_VALIDAS.includes(c.moneda) ? c.moneda : 'PEN',
+    fechaRegistro: typeof c.fechaRegistro === 'string' ? c.fechaRegistro : new Date().toISOString().slice(0, 10),
+    completada: Boolean(c.completada)
+  };
+};
+
+const sanearPrestamo = (p, idx) => ({
+  ...p,
+  id: typeof p.id === 'string' && p.id ? p.id : `prest_imp_${Date.now()}_${idx}`,
+  tipo: p.tipo === 'otorgado' ? 'otorgado' : 'tomado',
+  nombre: typeof p.nombre === 'string' && p.nombre ? p.nombre : `Préstamo ${idx + 1}`,
+  entidad: typeof p.entidad === 'string' ? p.entidad : 'Contacto',
+  telefono: typeof p.telefono === 'string' ? p.telefono : '',
+  esInformal: Boolean(p.esInformal),
+  montoTotal: Number.isFinite(Number(p.montoTotal)) ? Math.max(0, Number(p.montoTotal)) : 0,
+  montoPendiente: Number.isFinite(Number(p.montoPendiente)) ? Math.max(0, Number(p.montoPendiente)) : 0,
+  diaVencimiento: Number.isFinite(Number(p.diaVencimiento)) ? Number(p.diaVencimiento) : null,
+  moneda: MONEDAS_VALIDAS.includes(p.moneda) ? p.moneda : 'PEN'
+});
+
+const sanearRecurrente = (r, idx) => ({
+  ...r,
+  id: typeof r.id === 'string' && r.id ? r.id : `rec_imp_${Date.now()}_${idx}`,
+  tipo: r.tipo === 'ingreso' ? 'ingreso' : 'gasto',
+  monto: Number.isFinite(Number(r.monto)) ? Math.max(0, Number(r.monto)) : 0,
+  descripcion: typeof r.descripcion === 'string' && r.descripcion ? r.descripcion : 'Movimiento recurrente',
+  categoria: typeof r.categoria === 'string' && r.categoria ? r.categoria : 'Otros Gastos',
+  diaPago: Math.min(31, Math.max(1, parseInt(r.diaPago, 10) || 1)),
+  moneda: MONEDAS_VALIDAS.includes(r.moneda) ? r.moneda : 'PEN',
+  cuentaId: typeof r.cuentaId === 'string' ? r.cuentaId : null,
+  metodo: typeof r.metodo === 'string' ? r.metodo : 'Cuenta',
+  ultimoMesRegistrado: typeof r.ultimoMesRegistrado === 'string' ? r.ultimoMesRegistrado : null
+});
+
+const sanearCierre = (c, idx) => ({
+  ...c,
+  id: typeof c.id === 'string' && c.id ? c.id : `cierre_imp_${Date.now()}_${idx}`,
+  periodo: typeof c.periodo === 'string' ? c.periodo : 'Periodo',
+  fechaCierre: typeof c.fechaCierre === 'string' ? c.fechaCierre : '',
+  ingresos: Number.isFinite(Number(c.ingresos)) ? Number(c.ingresos) : 0,
+  gastos: Number.isFinite(Number(c.gastos)) ? Number(c.gastos) : 0,
+  balanceNeto: Number.isFinite(Number(c.balanceNeto)) ? Number(c.balanceNeto) : 0,
+  saldoLiquidoFinal: Number.isFinite(Number(c.saldoLiquidoFinal)) ? Number(c.saldoLiquidoFinal) : 0,
+  moneda: MONEDAS_VALIDAS.includes(c.moneda) ? c.moneda : 'PEN'
+});
+
+const sanearMeta = (m, idx) => ({
+  ...m,
+  id: typeof m.id === 'string' && m.id ? m.id : `meta_imp_${Date.now()}_${idx}`,
+  nombre: typeof m.nombre === 'string' && m.nombre ? m.nombre : `Meta ${idx + 1}`,
+  montoObjetivo: Number.isFinite(Number(m.montoObjetivo)) ? Math.max(0, Number(m.montoObjetivo)) : 0,
+  montoActual: Number.isFinite(Number(m.montoActual)) ? Math.max(0, Number(m.montoActual)) : 0,
+  fechaLimite: typeof m.fechaLimite === 'string' ? m.fechaLimite : '',
+  moneda: MONEDAS_VALIDAS.includes(m.moneda) ? m.moneda : 'PEN',
+  color: typeof m.color === 'string' ? m.color : '#10B981'
+});
+
+// Función asíncrona de hash SHA-256 con fallback determinista para contraseñas y respuestas de seguridad
+const hashTextoSeguro = async (texto) => {
+  const normalizado = String(texto || '');
+  try {
+    if (typeof window !== 'undefined' && window.crypto && window.crypto.subtle) {
+      const encoder = new TextEncoder();
+      const data = encoder.encode(`finanzas_salt_${normalizado}`);
+      const hashBuffer = await window.crypto.subtle.digest('SHA-256', data);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      return 'sha256_' + hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+    }
+  } catch (e) {
+    // Fallback si WebCrypto no está disponible en contexto no seguro
+  }
+  let h1 = 0xdeadbeef ^ normalizado.length;
+  let h2 = 0x41c6ce57 ^ normalizado.length;
+  for (let i = 0; i < normalizado.length; i++) {
+    const ch = normalizado.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return 'h64_' + (h2 >>> 0).toString(16).padStart(8, '0') + (h1 >>> 0).toString(16).padStart(8, '0');
+};
+
+const verificarSecreta = async (entrada, almacenada) => {
+  if (!almacenada) return false;
+  if (almacenada.startsWith('sha256_') || almacenada.startsWith('h64_')) {
+    const hashedInput = await hashTextoSeguro(entrada);
+    return hashedInput === almacenada;
+  }
+  // Compatibilidad con registros antiguos en texto plano
+  return entrada === almacenada;
+};
+
+// ErrorBoundary para evitar que cualquier dato corrupto deje la aplicación en blanco
+class AppErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, errorMessage: '' };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, errorMessage: error?.message || 'Error inesperado de datos' };
+  }
+
+  handleRecuperar = () => {
+    try {
+      const activeUser = leerJSON('finanzas_active_user', null);
+      if (activeUser && activeUser.username) {
+        const prefix = `finanzas_app_${activeUser.username}_`;
+        const keysConArrays = ['transacciones', 'cuentas_bancarias', 'tarjetas', 'cuotas_tarjetas', 'prestamos', 'recurrentes', 'metas', 'cierres_historicos'];
+        keysConArrays.forEach((k) => {
+          const val = leerJSON(`${prefix}${k}`, []);
+          if (!Array.isArray(val)) {
+            localStorage.setItem(`${prefix}${k}`, JSON.stringify([]));
+          }
+        });
+        const pres = leerJSON(`${prefix}presupuestos`, {});
+        if (!esObjetoPlano(pres)) {
+          localStorage.setItem(`${prefix}presupuestos`, JSON.stringify({}));
+        }
+      }
+    } catch (e) {
+      // Ignorar errores de almacenamiento al recuperar
+    }
+    this.setState({ hasError: false, errorMessage: '' });
+  };
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl max-w-md w-full p-6 space-y-4 text-center">
+            <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center mx-auto">
+              <AlertTriangle className="w-6 h-6" />
+            </div>
+            <h2 className="text-lg font-bold text-white">Se detectó un problema con los datos cargados</h2>
+            <p className="text-xs text-slate-400">
+              Un archivo de respaldo o registro malformado intentó cargarse en la vista. Tus datos válidos están protegidos y puedes restaurar la interfaz de inmediato.
+            </p>
+            <div className="flex flex-col sm:flex-row gap-2 pt-2">
+              <button
+                type="button"
+                onClick={this.handleRecuperar}
+                className="flex-1 py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition-colors"
+              >
+                Restaurar Aplicación
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  localStorage.removeItem('finanzas_active_user');
+                  window.location.reload();
+                }}
+                className="flex-1 py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold rounded-xl transition-colors"
+              >
+                Volver al Inicio
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function FinanzasDashboard() {
   // --- ESTADO DE AUTENTICACIÓN ---
   const [user, setUser] = useState(() => {
     const activeUser = leerJSON('finanzas_active_user', null);
@@ -131,22 +374,75 @@ export default function App() {
     return loadUserData(user.username, 'dark_mode', false);
   });
   const [moneda, setMoneda] = useState(() => {
-    if (!user) return 'CLP';
-    return loadUserData(user.username, 'moneda', 'CLP');
+    if (!user) return 'PEN';
+    return loadUserData(user.username, 'moneda', 'PEN');
   });
+  const [monedaInicioForm, setMonedaInicioForm] = useState('PEN');
 
   const [tiposCambio, setTiposCambio] = useState(() => {
     if (!user) return { USD_PEN: 3.75, EUR_PEN: 4.10, CLP_PEN: 0.0041, USD_CLP: 920, EUR_CLP: 1000 };
     return loadUserData(user.username, 'tipos_cambio', { USD_PEN: 3.75, EUR_PEN: 4.10, CLP_PEN: 0.0041, USD_CLP: 920, EUR_CLP: 1000 });
   });
 
-  // Categorías personalizadas por usuario
-  const [catGastosPers, setCatGastosPers] = useState([]);
-  const [catIngresosPers, setCatIngresosPers] = useState([]);
-  const [nuevaCatGasto, setNuevaCatGasto] = useState('');
-  const [nuevaCatIngreso, setNuevaCatIngreso] = useState('');
+  // --- ESTADOS DE DATOS PRINCIPALES ---
+  const [transacciones, setTransacciones] = useState(() => {
+    if (!user) return TRANSACCIONES_DEFECTO;
+    return sanearArrayObjetos(loadUserData(user.username, 'transacciones', TRANSACCIONES_DEFECTO), sanearTransaccion) || TRANSACCIONES_DEFECTO;
+  });
+  const [cuentasBancarias, setCuentasBancarias] = useState(() => {
+    if (!user) return CUENTAS_DEFECTO;
+    return sanearArrayObjetos(loadUserData(user.username, 'cuentas_bancarias', CUENTAS_DEFECTO), sanearCuenta) || CUENTAS_DEFECTO;
+  });
+  const [tarjetas, setTarjetas] = useState(() => {
+    if (!user) return TARJETAS_DEFECTO;
+    return sanearArrayObjetos(loadUserData(user.username, 'tarjetas', TARJETAS_DEFECTO), sanearTarjeta) || TARJETAS_DEFECTO;
+  });
+  const [cuotasTarjetas, setCuotasTarjetas] = useState(() => {
+    if (!user) return [];
+    return sanearArrayObjetos(loadUserData(user.username, 'cuotas_tarjetas', []), sanearCuotaTarjeta) || [];
+  });
+  const [prestamos, setPrestamos] = useState(() => {
+    if (!user) return PRESTAMOS_DEFECTO;
+    return sanearArrayObjetos(loadUserData(user.username, 'prestamos', PRESTAMOS_DEFECTO), sanearPrestamo) || PRESTAMOS_DEFECTO;
+  });
+  const [presupuestos, setPresupuestos] = useState(() => {
+    if (!user) return {};
+    const saved = loadUserData(user.username, 'presupuestos', {});
+    return esObjetoPlano(saved) ? saved : {};
+  });
+  const [presupuestoGlobal, setPresupuestoGlobal] = useState(() => {
+    if (!user) return 0;
+    const val = Number(loadUserData(user.username, 'presupuesto_global', 0));
+    return Number.isFinite(val) && val >= 0 ? val : 0;
+  });
+  const [recurrentes, setRecurrentes] = useState(() => {
+    if (!user) return [];
+    return sanearArrayObjetos(loadUserData(user.username, 'recurrentes', []), sanearRecurrente) || [];
+  });
+  const [metas, setMetas] = useState(() => {
+    if (!user) return [];
+    return sanearArrayObjetos(loadUserData(user.username, 'metas', []), sanearMeta) || [];
+  });
+  const [catGastosPers, setCatGastosPers] = useState(() => {
+    if (!user) return CATEGORIAS_GASTOS_DEFECTO;
+    const saved = sanearArrayStrings(loadUserData(user.username, 'cat_gastos_pers', CATEGORIAS_GASTOS_DEFECTO));
+    return saved && saved.length > 0 ? saved : CATEGORIAS_GASTOS_DEFECTO;
+  });
+  const [catIngresosPers, setCatIngresosPers] = useState(() => {
+    if (!user) return CATEGORIAS_INGRESOS_DEFECTO;
+    const saved = sanearArrayStrings(loadUserData(user.username, 'cat_ingresos_pers', CATEGORIAS_INGRESOS_DEFECTO));
+    return saved && saved.length > 0 ? saved : CATEGORIAS_INGRESOS_DEFECTO;
+  });
+  const [cierresHistoricos, setCierresHistoricos] = useState(() => {
+    if (!user) return [];
+    return sanearArrayObjetos(loadUserData(user.username, 'cierres_historicos', []), sanearCierre) || [];
+  });
 
-  // Formularios Auth
+  // --- ESTADOS DE NAVEGACIÓN, FECHA Y AUTENTICACIÓN ---
+  const [seccionActiva, setSeccionActiva] = useState('general');
+  const [mesSeleccionado, setMesSeleccionado] = useState(() => new Date().getMonth());
+  const [anioSeleccionado, setAnioSeleccionado] = useState(() => new Date().getFullYear());
+
   const [modoAuth, setModoAuth] = useState('login');
   const [usernameForm, setUsernameForm] = useState('');
   const [passwordForm, setPasswordForm] = useState('');
@@ -155,55 +451,164 @@ export default function App() {
   const [errorAuth, setErrorAuth] = useState('');
   const [procesandoAuth, setProcesandoAuth] = useState(false);
 
-  // Modal Recuperar Contraseña
   const [mostrarModalRecuperar, setMostrarModalRecuperar] = useState(false);
+  const [pasoRecuperacion, setPasoRecuperacion] = useState(1);
   const [userRecuperar, setUserRecuperar] = useState('');
+  const [preguntaUsuario, setPreguntaUsuario] = useState('');
   const [respuestaRecuperar, setRespuestaRecuperar] = useState('');
   const [nuevaPasswordForm, setNuevaPasswordForm] = useState('');
-  const [preguntaUsuario, setPreguntaUsuario] = useState('');
-  const [pasoRecuperacion, setPasoRecuperacion] = useState(1);
   const [mensajeRecuperacion, setMensajeRecuperacion] = useState(null);
 
-  // Modal Borrar Caché / Datos
   const [mostrarModalBorrarCache, setMostrarModalBorrarCache] = useState(false);
   const [confirmarTextoBorrar, setConfirmarTextoBorrar] = useState('');
-
-  // Navegación y Secciones
-  const [seccionActiva, setSeccionActiva] = useState('general');
-  const [mesSeleccionado, setMesSeleccionado] = useState(new Date().getMonth());
-  const [anioSeleccionado, setAnioSeleccionado] = useState(new Date().getFullYear());
-
-  // Datos principales por usuario
-  const [transacciones, setTransacciones] = useState([]);
-  const [cuentasBancarias, setCuentasBancarias] = useState([]);
-  const [tarjetas, setTarjetas] = useState([]);
-  const [cuotasTarjetas, setCuotasTarjetas] = useState([]);
-  const [prestamos, setPrestamos] = useState([]);
-  const [presupuestos, setPresupuestos] = useState({});
-  const [presupuestoGlobal, setPresupuestoGlobal] = useState(0);
-  const [recurrentes, setRecurrentes] = useState([]);
-  const [metas, setMetas] = useState([]);
-  const [cierresHistoricos, setCierresHistoricos] = useState([]);
-
-  // Modal Cierre de Mes
   const [mostrarModalCierre, setMostrarModalCierre] = useState(false);
 
-  // Cargar datos al iniciar sesión o cambiar usuario
+  const [nuevaCatGasto, setNuevaCatGasto] = useState('');
+  const [nuevaCatIngreso, setNuevaCatIngreso] = useState('');
+
+  // Cargar datos al iniciar sesión o cambiar usuario (con saneamiento estricto)
   useEffect(() => {
     if (!user) return;
-    setTransacciones(loadUserData(user.username, 'transacciones', TRANSACCIONES_DEFECTO));
-    setCuentasBancarias(loadUserData(user.username, 'cuentas_bancarias', CUENTAS_DEFECTO));
-    setTarjetas(loadUserData(user.username, 'tarjetas', TARJETAS_DEFECTO));
-    setCuotasTarjetas(loadUserData(user.username, 'cuotas_tarjetas', []));
-    setPrestamos(loadUserData(user.username, 'prestamos', PRESTAMOS_DEFECTO));
-    setPresupuestos(loadUserData(user.username, 'presupuestos', {}));
-    setPresupuestoGlobal(loadUserData(user.username, 'presupuesto_global', 0));
-    setRecurrentes(loadUserData(user.username, 'recurrentes', []));
-    setMetas(loadUserData(user.username, 'metas', []));
-    setCatGastosPers(loadUserData(user.username, 'cat_gastos_pers', CATEGORIAS_GASTOS_DEFECTO));
-    setCatIngresosPers(loadUserData(user.username, 'cat_ingresos_pers', CATEGORIAS_INGRESOS_DEFECTO));
-    setCierresHistoricos(loadUserData(user.username, 'cierres_historicos', []));
+    setDarkMode(Boolean(loadUserData(user.username, 'dark_mode', false)));
+
+    const monGuardada = loadUserData(user.username, 'moneda', 'PEN');
+    setMoneda(MONEDAS_VALIDAS.includes(monGuardada) ? monGuardada : 'PEN');
+
+    const tcGuardado = loadUserData(user.username, 'tipos_cambio', TIPOS_CAMBIO_DEFECTO);
+    if (esObjetoPlano(tcGuardado)) {
+      const tcLimpio = { ...TIPOS_CAMBIO_DEFECTO };
+      Object.keys(TIPOS_CAMBIO_DEFECTO).forEach((k) => {
+        const val = Number(tcGuardado[k]);
+        if (Number.isFinite(val) && val > 0) tcLimpio[k] = val;
+      });
+      setTiposCambio(tcLimpio);
+    } else {
+      setTiposCambio(TIPOS_CAMBIO_DEFECTO);
+    }
+
+    const transGuardadas = sanearArrayObjetos(loadUserData(user.username, 'transacciones', TRANSACCIONES_DEFECTO), sanearTransaccion);
+    setTransacciones(transGuardadas || TRANSACCIONES_DEFECTO);
+
+    const cuentasGuardadas = sanearArrayObjetos(loadUserData(user.username, 'cuentas_bancarias', CUENTAS_DEFECTO), sanearCuenta);
+    setCuentasBancarias(cuentasGuardadas || CUENTAS_DEFECTO);
+
+    const tarjetasGuardadas = sanearArrayObjetos(loadUserData(user.username, 'tarjetas', TARJETAS_DEFECTO), sanearTarjeta);
+    setTarjetas(tarjetasGuardadas || TARJETAS_DEFECTO);
+
+    const cuotasGuardadas = sanearArrayObjetos(loadUserData(user.username, 'cuotas_tarjetas', []), sanearCuotaTarjeta);
+    setCuotasTarjetas(cuotasGuardadas || []);
+
+    const prestamosGuardados = sanearArrayObjetos(loadUserData(user.username, 'prestamos', PRESTAMOS_DEFECTO), sanearPrestamo);
+    setPrestamos(prestamosGuardados || PRESTAMOS_DEFECTO);
+
+    const presGuardados = loadUserData(user.username, 'presupuestos', {});
+    if (esObjetoPlano(presGuardados)) {
+      const presLimpios = {};
+      Object.entries(presGuardados).forEach(([cat, lim]) => {
+        const num = Number(lim);
+        if (typeof cat === 'string' && cat.trim() && Number.isFinite(num) && num > 0) {
+          presLimpios[cat] = num;
+        }
+      });
+      setPresupuestos(presLimpios);
+    } else {
+      setPresupuestos({});
+    }
+
+    const pgGuardado = Number(loadUserData(user.username, 'presupuesto_global', 0));
+    setPresupuestoGlobal(Number.isFinite(pgGuardado) && pgGuardado >= 0 ? pgGuardado : 0);
+
+    const recGuardados = sanearArrayObjetos(loadUserData(user.username, 'recurrentes', []), sanearRecurrente);
+    setRecurrentes(recGuardados || []);
+
+    const metasGuardadas = sanearArrayObjetos(loadUserData(user.username, 'metas', []), sanearMeta);
+    setMetas(metasGuardadas || []);
+
+    const catGastosGuardadas = sanearArrayStrings(loadUserData(user.username, 'cat_gastos_pers', CATEGORIAS_GASTOS_DEFECTO));
+    setCatGastosPers(catGastosGuardadas && catGastosGuardadas.length > 0 ? catGastosGuardadas : CATEGORIAS_GASTOS_DEFECTO);
+
+    const catIngresosGuardadas = sanearArrayStrings(loadUserData(user.username, 'cat_ingresos_pers', CATEGORIAS_INGRESOS_DEFECTO));
+    setCatIngresosPers(catIngresosGuardadas && catIngresosGuardadas.length > 0 ? catIngresosGuardadas : CATEGORIAS_INGRESOS_DEFECTO);
+
+    const cierresGuardados = sanearArrayObjetos(loadUserData(user.username, 'cierres_historicos', []), sanearCierre);
+    setCierresHistoricos(cierresGuardados || []);
   }, [user]);
+
+  // Sincronización automática mes a mes de las compras en cuotas según la fecha de registro y el mes actual
+  useEffect(() => {
+    if (!user || cuotasTarjetas.length === 0) return;
+
+    const hoy = new Date();
+    const indiceMesActual = hoy.getFullYear() * 12 + hoy.getMonth();
+
+    let huboCambios = false;
+    const nuevosMovimientosGenerados = [];
+
+    const cuotasActualizadas = cuotasTarjetas.map(c => {
+      if (c.completada) return c;
+
+      const fechaBaseStr = c.fechaRegistro || getFechaLocalHoy();
+      const [yStr, mStr, dStr] = fechaBaseStr.split('-');
+      const anioReg = parseInt(yStr, 10);
+      const mesReg = parseInt(mStr, 10) - 1;
+      const diaReg = parseInt(dStr, 10) || 1;
+      if (isNaN(anioReg) || isNaN(mesReg)) return c;
+
+      const indiceMesRegistro = anioReg * 12 + mesReg;
+      const mesesTranscurridos = Math.max(0, indiceMesActual - indiceMesRegistro);
+      const cuotaInicial = c.cuotaInicial || c.cuotaActual || 1;
+      const cuotaCalculada = Math.min(c.totalCuotas, cuotaInicial + mesesTranscurridos);
+
+      // Solo avanzar automáticamente si el cálculo por calendario supera la cuota actual
+      if (cuotaCalculada > c.cuotaActual) {
+        huboCambios = true;
+        const generadas = Array.isArray(c.cuotasGeneradas) ? [...c.cuotasGeneradas] : [c.cuotaActual];
+
+        for (let numCuota = c.cuotaActual + 1; numCuota <= cuotaCalculada; numCuota++) {
+          if (!generadas.includes(numCuota)) {
+            generadas.push(numCuota);
+            const offsetMeses = numCuota - cuotaInicial;
+            const fechaCuotaObj = new Date(anioReg, mesReg + offsetMeses, 1);
+            const diasEnMesCuota = new Date(fechaCuotaObj.getFullYear(), fechaCuotaObj.getMonth() + 1, 0).getDate();
+            const diaValido = Math.min(c.diaFacturacion || diaReg, diasEnMesCuota);
+            const fechaFormateada = `${fechaCuotaObj.getFullYear()}-${String(fechaCuotaObj.getMonth() + 1).padStart(2, '0')}-${String(diaValido).padStart(2, '0')}`;
+
+            nuevosMovimientosGenerados.push({
+              id: `trans_cuota_${c.id}_${numCuota}_${Date.now()}`,
+              tipo: 'gasto',
+              monto: c.valorCuotaMensual,
+              descripcion: `${c.concepto} (Cuota ${numCuota}/${c.totalCuotas})`,
+              nota: `Compra en cuotas • Total: ${formatoMoneda(c.montoTotal, c.moneda || 'PEN')}`,
+              categoria: c.categoria || 'Compras',
+              fecha: fechaFormateada,
+              moneda: c.moneda || 'PEN',
+              esCredito: true,
+              tarjetaId: c.tarjetaId,
+              metodo: c.tarjetaNombre,
+              cuotaId: c.id,
+              numeroCuota: numCuota
+            });
+          }
+        }
+
+        return {
+          ...c,
+          cuotaInicial,
+          cuotaActual: cuotaCalculada,
+          cuotasGeneradas: generadas,
+          ultimoMesSincronizado: `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}`
+        };
+      }
+      return c;
+    });
+
+    if (huboCambios) {
+      if (nuevosMovimientosGenerados.length > 0) {
+        setTransacciones(prev => [...nuevosMovimientosGenerados, ...prev]);
+      }
+      setCuotasTarjetas(cuotasActualizadas);
+    }
+  }, [user, cuotasTarjetas]);
 
   // Guardar datos ante cambios
   useEffect(() => {
@@ -282,6 +687,8 @@ export default function App() {
   const [montoTotalCuotaForm, setMontoTotalCuotaForm] = useState('');
   const [numCuotasForm, setNumCuotasForm] = useState('3');
   const [cuotaActualForm, setCuotaActualForm] = useState('1');
+  const [categoriaCuotaForm, setCategoriaCuotaForm] = useState('Compras');
+  const [fechaCuotaForm, setFechaCuotaForm] = useState(getFechaLocalHoy());
 
   const [mostrarModalPagoTarjeta, setMostrarModalPagoTarjeta] = useState(false);
   const [tarjetaAPagarId, setTarjetaAPagarId] = useState('');
@@ -321,6 +728,52 @@ export default function App() {
   const [mostrarModalConfig, setMostrarModalConfig] = useState(false);
   const [mostrarModalInfoData, setMostrarModalInfoData] = useState(false);
   const [mensajeRespaldo, setMensajeRespaldo] = useState(null);
+
+  // Estados para Generador de Reporte PDF
+  const [mostrarModalPdf, setMostrarModalPdf] = useState(false);
+  const [pdfTipoPeriodo, setPdfTipoPeriodo] = useState('mes'); // 'mes' | 'anio' | 'rango'
+  const [pdfFechaInicio, setPdfFechaInicio] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+  });
+  const [pdfFechaFin, setPdfFechaFin] = useState(() => getFechaLocalHoy());
+  const [pdfCompararAnterior, setPdfCompararAnterior] = useState(true);
+  const [pdfIncluirCuentasDeudas, setPdfIncluirCuentasDeudas] = useState(true);
+  const [pdfIncluirResumenAnual, setPdfIncluirResumenAnual] = useState(false);
+  const [pdfIncluirMetas, setPdfIncluirMetas] = useState(true);
+
+  // Estados para Metas de Ahorro
+  const [mostrarModalMeta, setMostrarModalMeta] = useState(false);
+  const [nombreMetaForm, setNombreMetaForm] = useState('');
+  const [montoObjetivoMetaForm, setMontoObjetivoMetaForm] = useState('');
+  const [montoInicialMetaForm, setMontoInicialMetaForm] = useState('');
+  const [fechaLimiteMetaForm, setFechaLimiteMetaForm] = useState('');
+  const [monedaMetaForm, setMonedaMetaForm] = useState('PEN');
+  const [colorMetaForm, setColorMetaForm] = useState('#10B981');
+
+  const [mostrarModalAporteMeta, setMostrarModalAporteMeta] = useState(false);
+  const [metaSeleccionadaId, setMetaSeleccionadaId] = useState('');
+  const [cuentaAporteMetaId, setCuentaAporteMetaId] = useState('');
+  const [montoAporteMetaForm, setMontoAporteMetaForm] = useState('');
+  const [descontarCuentaMeta, setDescontarCuentaMeta] = useState(true);
+
+  // Estados para Diálogos Propios (confirmación y avisos sin window.confirm/alert)
+  const [dialogoConfirmacion, setDialogoConfirmacion] = useState(null);
+  const [notificacionToast, setNotificacionToast] = useState(null);
+
+  const mostrarAviso = (texto, tipo = 'info') => {
+    setNotificacionToast({ texto, tipo, id: Date.now() });
+  };
+
+  useEffect(() => {
+    if (!notificacionToast) return;
+    const timer = setTimeout(() => setNotificacionToast(null), 4200);
+    return () => clearTimeout(timer);
+  }, [notificacionToast]);
+
+  const abrirConfirmacion = ({ titulo, mensaje, textoConfirmar = 'Confirmar', variante = 'danger', onConfirm }) => {
+    setDialogoConfirmacion({ titulo, mensaje, textoConfirmar, variante, onConfirm });
+  };
 
   // Conversor de divisas ampliado con soporte para CLP
   const convertirMoneda = (monto, monedaOrigen, monedaDestino = moneda) => {
@@ -364,7 +817,7 @@ export default function App() {
   };
 
   // Auth Submit Handler
-  const handleAuthSubmit = (e) => {
+  const handleAuthSubmit = async (e) => {
     e.preventDefault();
     setErrorAuth('');
     setProcesandoAuth(true);
@@ -391,10 +844,12 @@ export default function App() {
         setProcesandoAuth(false);
         return;
       }
+      const passwordHash = await hashTextoSeguro(passwordForm);
+      const respuestaHash = await hashTextoSeguro(respuestaForm.trim().toLowerCase());
       usersDb[cleanUsername] = { 
-        password: passwordForm,
+        passwordHash,
         preguntaSeguridad: preguntaForm,
-        respuestaSeguridad: respuestaForm.trim().toLowerCase()
+        respuestaHash
       };
       try {
         localStorage.setItem('finanzas_users_registry', JSON.stringify(usersDb));
@@ -404,14 +859,29 @@ export default function App() {
         return;
       }
     } else {
-      if (!usersDb[cleanUsername] || usersDb[cleanUsername].password !== passwordForm) {
+      const userRecord = usersDb[cleanUsername];
+      const claveAlmacenada = userRecord ? (userRecord.passwordHash || userRecord.password) : null;
+      const esValida = userRecord && await verificarSecreta(passwordForm, claveAlmacenada);
+      if (!esValida) {
         setErrorAuth('Usuario o contraseña incorrectos.');
         setProcesandoAuth(false);
         return;
       }
+      // Migrar automáticamente cuentas antiguas a hash seguro
+      if (userRecord && !userRecord.passwordHash && userRecord.password) {
+        userRecord.passwordHash = await hashTextoSeguro(passwordForm);
+        delete userRecord.password;
+        try {
+          localStorage.setItem('finanzas_users_registry', JSON.stringify(usersDb));
+        } catch (err) {
+          // Ignorar fallo silencioso de migración
+        }
+      }
     }
 
     const newActiveUser = { username: cleanUsername, uid: `usr_${cleanUsername}_${Date.now()}` };
+    saveUserData(cleanUsername, 'moneda', monedaInicioForm);
+    setMoneda(monedaInicioForm);
     localStorage.setItem('finanzas_active_user', JSON.stringify(newActiveUser));
     setUser(newActiveUser);
     setProcesandoAuth(false);
@@ -452,7 +922,7 @@ export default function App() {
     setPasoRecuperacion(2);
   };
 
-  const handleRestablecerPassword = (e) => {
+  const handleRestablecerPassword = async (e) => {
     e.preventDefault();
     setMensajeRecuperacion(null);
     const cleanUsername = userRecuperar.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -465,8 +935,9 @@ export default function App() {
       return;
     }
 
-    const respGuardada = userData.respuestaSeguridad || '';
-    if (respGuardada && respuestaRecuperar.trim().toLowerCase() !== respGuardada) {
+    const respGuardada = userData.respuestaHash || userData.respuestaSeguridad || '';
+    const respuestaValida = !respGuardada || await verificarSecreta(respuestaRecuperar.trim().toLowerCase(), respGuardada);
+    if (!respuestaValida) {
       setMensajeRecuperacion({ tipo: 'error', texto: 'La respuesta de seguridad es incorrecta.' });
       return;
     }
@@ -476,7 +947,8 @@ export default function App() {
       return;
     }
 
-    registro[cleanUsername].password = nuevaPasswordForm;
+    registro[cleanUsername].passwordHash = await hashTextoSeguro(nuevaPasswordForm);
+    delete registro[cleanUsername].password;
     try {
       localStorage.setItem('finanzas_users_registry', JSON.stringify(registro));
       setMensajeRecuperacion({ tipo: 'ok', texto: '¡Contraseña actualizada correctamente! Ya puedes iniciar sesión.' });
@@ -506,7 +978,8 @@ export default function App() {
           saldo += convertirMoneda(montoVal, t.moneda || 'PEN', cta.moneda || 'PEN');
         } else if ((t.tipo === 'gasto' && !t.esCredito && asignadaEstaCuenta) ||
                    (t.tipo === 'pago_tarjeta' && asignadaEstaCuenta) ||
-                   (t.tipo === 'pago_prestamo' && asignadaEstaCuenta)) {
+                   (t.tipo === 'pago_prestamo' && asignadaEstaCuenta) ||
+                   (t.tipo === 'aporte_meta' && asignadaEstaCuenta)) {
           saldo -= convertirMoneda(montoVal, t.moneda || 'PEN', cta.moneda || 'PEN');
         } else if (t.tipo === 'transferencia_salida' && asignadaEstaCuenta) {
           saldo -= convertirMoneda(montoVal, t.moneda || 'PEN', cta.moneda || 'PEN');
@@ -537,7 +1010,6 @@ export default function App() {
   }, [cuentasBancarias, transacciones, tiposCambio]);
 
   const saldoLiquidoTotal = useMemo(() => {
-    // Evitamos duplicar cuentas vinculadas al sumar únicamente las cuentas principales o aquellas que no tienen vinculación activa duplicada
     const idsProcesados = new Set();
     let total = 0;
 
@@ -574,7 +1046,7 @@ export default function App() {
           } else {
             gastosLiquidos += montoConvertido;
           }
-        } else if (t.tipo === 'pago_tarjeta' || t.tipo === 'pago_prestamo') {
+        } else if (t.tipo === 'pago_tarjeta' || t.tipo === 'pago_prestamo' || t.tipo === 'aporte_meta') {
           pagosLiquidosEspeciales += montoConvertido;
         }
       }
@@ -762,7 +1234,7 @@ export default function App() {
       const m = parseInt(monthStr, 10) - 1;
 
       if (y === anioSeleccionado && m === mesSeleccionado) {
-        const esSalida = (t.tipo === 'gasto' && !t.esCredito) || t.tipo === 'pago_tarjeta' || t.tipo === 'pago_prestamo' || t.tipo === 'transferencia_salida';
+        const esSalida = (t.tipo === 'gasto' && !t.esCredito) || t.tipo === 'pago_tarjeta' || t.tipo === 'pago_prestamo' || t.tipo === 'aporte_meta' || t.tipo === 'transferencia_salida';
         if (esSalida) {
           const ctaNombre = t.metodo || 'General';
           const montoConv = convertirMoneda(t.monto, t.moneda || 'PEN', moneda);
@@ -851,6 +1323,78 @@ export default function App() {
     return transacciones.filter(t => t.tipo === 'pago_tarjeta' || t.tipo === 'pago_prestamo')
       .sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
   }, [transacciones]);
+
+  // Resumen Anual consolidado por mes (Enero - Diciembre del año seleccionado)
+  const resumenAnual = useMemo(() => {
+    const mesesData = NOMBRES_MESES.map((nombre, idx) => ({
+      mesIndex: idx,
+      mes: nombre,
+      mesCorto: nombre.slice(0, 3),
+      ingresos: 0,
+      gastosLiquidos: 0,
+      gastosCredito: 0,
+      gastosTotales: 0,
+      balance: 0,
+      cerrado: cierresHistoricos.some((c) => c.periodo === `${nombre} ${anioSeleccionado}`)
+    }));
+
+    transacciones.forEach((t) => {
+      const [yStr, mStr] = (t.fecha || '').split('-');
+      const y = parseInt(yStr, 10);
+      const m = parseInt(mStr, 10) - 1;
+      if (y !== anioSeleccionado || m < 0 || m > 11) return;
+
+      const montoConv = convertirMoneda(t.monto, t.moneda || 'PEN', moneda);
+      if (t.tipo === 'ingreso') {
+        mesesData[m].ingresos += montoConv;
+      } else if (t.tipo === 'gasto') {
+        if (t.esCredito) {
+          mesesData[m].gastosCredito += montoConv;
+        } else {
+          mesesData[m].gastosLiquidos += montoConv;
+        }
+      } else if (t.tipo === 'pago_tarjeta' || t.tipo === 'pago_prestamo' || t.tipo === 'aporte_meta') {
+        mesesData[m].gastosLiquidos += montoConv;
+      }
+    });
+
+    let totalIngresosAnio = 0;
+    let totalGastosAnio = 0;
+    let totalLiquidoAnio = 0;
+    let totalCreditoAnio = 0;
+
+    mesesData.forEach((item) => {
+      item.gastosTotales = item.gastosLiquidos + item.gastosCredito;
+      item.balance = item.ingresos - item.gastosTotales;
+      item.Ingresos = Math.round(item.ingresos * 100) / 100;
+      item.Gastos = Math.round(item.gastosTotales * 100) / 100;
+      item.Balance = Math.round(item.balance * 100) / 100;
+
+      totalIngresosAnio += item.ingresos;
+      totalGastosAnio += item.gastosTotales;
+      totalLiquidoAnio += item.gastosLiquidos;
+      totalCreditoAnio += item.gastosCredito;
+    });
+
+    const ahorroNetoAnio = totalIngresosAnio - totalGastosAnio;
+    const tasaAhorroAnio = totalIngresosAnio > 0 ? Math.round((ahorroNetoAnio / totalIngresosAnio) * 100) : 0;
+
+    return {
+      meses: mesesData,
+      totalIngresosAnio,
+      totalGastosAnio,
+      totalLiquidoAnio,
+      totalCreditoAnio,
+      ahorroNetoAnio,
+      tasaAhorroAnio
+    };
+  }, [transacciones, anioSeleccionado, moneda, tiposCambio, cierresHistoricos]);
+
+  // Verificar si el mes actualmente visualizado ya fue cerrado
+  const cierreMesActual = useMemo(() => {
+    const periodoBuscado = `${NOMBRES_MESES[mesSeleccionado]} ${anioSeleccionado}`;
+    return cierresHistoricos.find((c) => c.periodo === periodoBuscado) || null;
+  }, [cierresHistoricos, mesSeleccionado, anioSeleccionado]);
 
   const todosLosMetodosDisponibles = useMemo(() => {
     const list = (cuentasBancarias || []).map(c => c.nombre);
@@ -952,26 +1496,127 @@ export default function App() {
     };
 
     if (transaccionEditandoId) {
+      const transAnterior = transacciones.find(t => t.id === transaccionEditandoId);
       setTransacciones(prev => prev.map(t => t.id === transaccionEditandoId ? nuevaTrans : t));
+
+      // Reconciliar deuda de tarjeta al editar un gasto (si cambió monto, tarjeta o modalidad líquido/crédito)
+      setTarjetas(prev => prev.map(tarj => {
+        let ajuste = 0;
+        if (transAnterior && transAnterior.tipo === 'gasto' && transAnterior.esCredito && transAnterior.tarjetaId === tarj.id) {
+          ajuste -= convertirMoneda(transAnterior.monto, transAnterior.moneda || 'PEN', tarj.moneda || 'PEN');
+        }
+        if (nuevaTrans.tipo === 'gasto' && nuevaTrans.esCredito && nuevaTrans.tarjetaId === tarj.id) {
+          ajuste += convertirMoneda(nuevaTrans.monto, nuevaTrans.moneda || 'PEN', tarj.moneda || 'PEN');
+        }
+        if (ajuste !== 0) {
+          return { ...tarj, deudaActual: Math.max(0, (tarj.deudaActual || 0) + ajuste) };
+        }
+        return tarj;
+      }));
     } else {
       setTransacciones(prev => [nuevaTrans, ...prev]);
-    }
 
-    if (esCreditoForm && targetTarjetaId) {
-      setTarjetas(prev => prev.map(t => {
-        if (t.id === targetTarjetaId) {
-          const delta = transaccionEditandoId ? 0 : parseFloat(montoForm);
-          return { ...t, deudaActual: (t.deudaActual || 0) + delta };
-        }
-        return t;
-      }));
+      if (esCreditoForm && targetTarjetaId) {
+        setTarjetas(prev => prev.map(t => {
+          if (t.id === targetTarjetaId) {
+            const montoEnTarjeta = convertirMoneda(parseFloat(montoForm), monedaTransForm, t.moneda || 'PEN');
+            return { ...t, deudaActual: (t.deudaActual || 0) + montoEnTarjeta };
+          }
+          return t;
+        }));
+      }
     }
 
     setMostrarModalTransaccion(false);
   };
 
+  const ejecutarEliminacionTransaccion = (t) => {
+    // 1. Si era un gasto a crédito en tarjeta, restar su importe de la deuda de la tarjeta
+    if (t.tipo === 'gasto' && t.esCredito) {
+      const targetTarjetaId = t.tarjetaId || tarjetas.find(tarj => tarj.nombre === t.metodo)?.id;
+      if (targetTarjetaId) {
+        setTarjetas(prev => prev.map(tarj => {
+          if (tarj.id === targetTarjetaId) {
+            const montoEnMonedaTarjeta = convertirMoneda(t.monto, t.moneda || 'PEN', tarj.moneda || 'PEN');
+            return { ...tarj, deudaActual: Math.max(0, (tarj.deudaActual || 0) - montoEnMonedaTarjeta) };
+          }
+          return tarj;
+        }));
+      }
+      // Si pertenecía a una compra en cuotas, descontar también su saldo pendiente
+      if (t.cuotaId) {
+        setCuotasTarjetas(prev => prev.map(c => {
+          if (c.id === t.cuotaId) {
+            const nuevoSaldo = Math.max(0, Number(c.saldoPendiente || 0) - Number(t.monto || 0));
+            return {
+              ...c,
+              saldoPendiente: nuevoSaldo,
+              completada: nuevoSaldo <= 0.01
+            };
+          }
+          return c;
+        }));
+      }
+    }
+
+    // 2. Si era un pago a tarjeta, restaurar la deuda que había sido amortizada en la tarjeta
+    if (t.tipo === 'pago_tarjeta') {
+      const targetTarjeta = (t.tarjetaId && tarjetas.find(tarj => tarj.id === t.tarjetaId)) ||
+        tarjetas.find(tarj => (t.descripcion || '').includes(tarj.nombre));
+      if (targetTarjeta) {
+        const montoEnMonedaTarjeta = convertirMoneda(t.monto, t.moneda || 'PEN', targetTarjeta.moneda || 'PEN');
+        setTarjetas(prev => prev.map(tarj => {
+          if (tarj.id === targetTarjeta.id) {
+            return { ...tarj, deudaActual: (tarj.deudaActual || 0) + montoEnMonedaTarjeta };
+          }
+          return tarj;
+        }));
+      }
+    }
+
+    // 3. Si era un abono de préstamo, restaurar el monto pendiente del préstamo
+    if (t.tipo === 'pago_prestamo') {
+      const targetPrestamo = (t.prestamoId && prestamos.find(p => p.id === t.prestamoId)) ||
+        prestamos.find(p => (t.descripcion || '').includes(p.nombre));
+      if (targetPrestamo) {
+        const montoEnMonedaPrestamo = convertirMoneda(t.monto, t.moneda || 'PEN', targetPrestamo.moneda || 'PEN');
+        setPrestamos(prev => prev.map(p => {
+          if (p.id === targetPrestamo.id) {
+            return { ...p, montoPendiente: Math.min(p.montoTotal || Infinity, (p.montoPendiente || 0) + montoEnMonedaPrestamo) };
+          }
+          return p;
+        }));
+      }
+    }
+
+    // 4. Si era un aporte a una meta de ahorro, descontar ese monto acumulado de la meta
+    if (t.tipo === 'aporte_meta' && t.metaId) {
+      setMetas(prev => prev.map(m => {
+        if (m.id === t.metaId) {
+          const montoEnMonedaMeta = convertirMoneda(t.monto, t.moneda || 'PEN', m.moneda || 'PEN');
+          return { ...m, montoActual: Math.max(0, (m.montoActual || 0) - montoEnMonedaMeta) };
+        }
+        return m;
+      }));
+    }
+
+    // 5. Eliminar el movimiento (y su contraparte si es transferencia entre cuentas)
+    if (t.transferenciaGrupoId) {
+      setTransacciones(prev => prev.filter(item => item.transferenciaGrupoId !== t.transferenciaGrupoId));
+    } else {
+      setTransacciones(prev => prev.filter(item => item.id !== t.id));
+    }
+    mostrarAviso('Movimiento eliminado y saldos/deudas ajustados.', 'ok');
+  };
+
   const eliminarTransaccion = (t) => {
-    setTransacciones(prev => prev.filter(item => item.id !== t.id));
+    abrirConfirmacion({
+      titulo: 'Eliminar movimiento',
+      mensaje: `¿Deseas eliminar "${t.descripcion}" (${formatoMoneda(t.monto, t.moneda || 'PEN')})? Se revertirá automáticamente su impacto en saldos y deudas.`,
+      textoConfirmar: 'Sí, eliminar',
+      variante: 'danger',
+      onConfirm: () => ejecutarEliminacionTransaccion(t)
+    });
   };
 
   // Cuentas Handlers
@@ -1000,9 +1645,20 @@ export default function App() {
 
   const eliminarCuenta = (id) => {
     if (cuentasBancarias.length <= 1) {
+      mostrarAviso('Debes mantener al menos una cuenta o billetera activa.', 'error');
       return;
     }
-    setCuentasBancarias(prev => prev.filter(c => c.id !== id));
+    const cta = cuentasBancarias.find(c => c.id === id);
+    abrirConfirmacion({
+      titulo: 'Eliminar cuenta o billetera',
+      mensaje: `¿Seguro que deseas eliminar "${cta?.nombre || 'esta cuenta'}"? Sus movimientos históricos conservarán el nombre de referencia.`,
+      textoConfirmar: 'Eliminar cuenta',
+      variante: 'danger',
+      onConfirm: () => {
+        setCuentasBancarias(prev => prev.filter(c => c.id !== id));
+        mostrarAviso('Cuenta eliminada correctamente.', 'ok');
+      }
+    });
   };
 
   const realizarTransferencia = (e) => {
@@ -1015,8 +1671,10 @@ export default function App() {
     if (!ctaOrigen || !ctaDestino) return;
 
     const fecha = getFechaLocalHoy();
+    const grupoId = `transf_grp_${Date.now()}`;
     const transSalida = {
       id: `trans_out_${Date.now()}`,
+      transferenciaGrupoId: grupoId,
       tipo: 'transferencia_salida',
       monto: monto,
       descripcion: `Transferencia hacia ${ctaDestino.nombre}`,
@@ -1029,6 +1687,7 @@ export default function App() {
 
     const transEntrada = {
       id: `trans_in_${Date.now()}`,
+      transferenciaGrupoId: grupoId,
       tipo: 'transferencia_entrada',
       monto: convertirMoneda(monto, ctaOrigen.moneda || 'PEN', ctaDestino.moneda || 'PEN'),
       descripcion: `Transferencia desde ${ctaOrigen.nombre}`,
@@ -1042,6 +1701,7 @@ export default function App() {
     setTransacciones(prev => [transSalida, transEntrada, ...prev]);
     setMostrarModalTransferencia(false);
     setMontoTransferenciaForm('');
+    mostrarAviso('Transferencia entre cuentas registrada.', 'ok');
   };
 
   // Tarjetas Handlers
@@ -1087,25 +1747,81 @@ export default function App() {
     if (!tarj) return;
 
     const valorCuotaMensual = montoTotal / totalCuotas;
+    const cuotaActualValida = Math.max(1, Math.min(cuotaActual, totalCuotas));
+    const cuotasRestantes = totalCuotas - cuotaActualValida + 1;
+    const saldoInicialDeuda = cuotasRestantes * valorCuotaMensual;
+    const fechaInicio = fechaCuotaForm || getFechaLocalHoy();
+    const [yStr, mStr, dStr] = fechaInicio.split('-');
+    const anioReg = parseInt(yStr, 10);
+    const mesReg = parseInt(mStr, 10) - 1;
+    const diaFacturacion = parseInt(dStr, 10) || 1;
+    const categoriaSeleccionada = categoriaCuotaForm || catGastosPers[0] || 'Compras';
+    const nuevoCuotaId = `cuota_${Date.now()}`;
+
+    const hoy = new Date();
+    const indiceMesActual = hoy.getFullYear() * 12 + hoy.getMonth();
+    const indiceMesRegistro = !isNaN(anioReg) && !isNaN(mesReg) ? (anioReg * 12 + mesReg) : indiceMesActual;
+    const mesesTranscurridos = Math.max(0, indiceMesActual - indiceMesRegistro);
+    const cuotaHastaHoy = Math.min(totalCuotas, cuotaActualValida + mesesTranscurridos);
+
+    const cuotasGeneradas = [];
+    const movimientosGenerados = [];
+
+    for (let numCuota = cuotaActualValida; numCuota <= cuotaHastaHoy; numCuota++) {
+      cuotasGeneradas.push(numCuota);
+      const offsetMeses = numCuota - cuotaActualValida;
+      const baseAnio = !isNaN(anioReg) ? anioReg : hoy.getFullYear();
+      const baseMes = !isNaN(mesReg) ? mesReg : hoy.getMonth();
+      const fechaCuotaObj = new Date(baseAnio, baseMes + offsetMeses, 1);
+      const diasEnMesCuota = new Date(fechaCuotaObj.getFullYear(), fechaCuotaObj.getMonth() + 1, 0).getDate();
+      const diaValido = Math.min(diaFacturacion, diasEnMesCuota);
+      const fechaFormateada = `${fechaCuotaObj.getFullYear()}-${String(fechaCuotaObj.getMonth() + 1).padStart(2, '0')}-${String(diaValido).padStart(2, '0')}`;
+
+      movimientosGenerados.push({
+        id: `trans_cuota_${nuevoCuotaId}_${numCuota}_${Date.now()}`,
+        tipo: 'gasto',
+        monto: valorCuotaMensual,
+        descripcion: `${conceptoCuotaForm.trim()} (Cuota ${numCuota}/${totalCuotas})`,
+        nota: `Compra en cuotas • Total: ${formatoMoneda(montoTotal, tarj.moneda || 'PEN')}`,
+        categoria: categoriaSeleccionada,
+        fecha: fechaFormateada,
+        moneda: tarj.moneda || 'PEN',
+        esCredito: true,
+        tarjetaId: tarj.id,
+        metodo: tarj.nombre,
+        cuotaId: nuevoCuotaId,
+        numeroCuota: numCuota
+      });
+    }
 
     const nuevaCompraCuotas = {
-      id: `cuota_${Date.now()}`,
+      id: nuevoCuotaId,
       tarjetaId: tarj.id,
       tarjetaNombre: tarj.nombre,
       concepto: conceptoCuotaForm.trim(),
+      categoria: categoriaSeleccionada,
       montoTotal,
       valorCuotaMensual,
+      saldoInicialDeuda,
+      saldoPendiente: saldoInicialDeuda,
+      montoPagado: 0,
+      cuotasPagadas: 0,
       totalCuotas,
-      cuotaActual: Math.min(cuotaActual, totalCuotas),
+      cuotaInicial: cuotaActualValida,
+      cuotaActual: cuotaHastaHoy,
+      cuotasGeneradas,
+      diaFacturacion,
       moneda: tarj.moneda || 'PEN',
-      fechaRegistro: getFechaLocalHoy()
+      fechaRegistro: fechaInicio,
+      completada: false
     };
 
     setCuotasTarjetas(prev => [...prev, nuevaCompraCuotas]);
+    setTransacciones(prev => [...movimientosGenerados.reverse(), ...prev]);
 
     setTarjetas(prev => prev.map(t => {
       if (t.id === tarj.id) {
-        return { ...t, deudaActual: (t.deudaActual || 0) + valorCuotaMensual };
+        return { ...t, deudaActual: (t.deudaActual || 0) + saldoInicialDeuda };
       }
       return t;
     }));
@@ -1115,21 +1831,106 @@ export default function App() {
     setMontoTotalCuotaForm('');
   };
 
+  const avanzarCuotaTarjeta = (id) => {
+    const cuotaItem = cuotasTarjetas.find(c => c.id === id);
+    if (!cuotaItem || cuotaItem.completada) return;
+
+    const saldoActualCuota = Math.max(0, Number(cuotaItem.saldoPendiente ?? 0));
+    if (saldoActualCuota <= 0.01) return;
+
+    const montoAmortizado = Math.min(cuotaItem.valorCuotaMensual, saldoActualCuota);
+    const nuevoSaldo = Math.max(0, saldoActualCuota - montoAmortizado);
+    const esUltimaCuota = cuotaItem.cuotaActual >= cuotaItem.totalCuotas || nuevoSaldo <= 0.01;
+    const generadas = Array.isArray(cuotaItem.cuotasGeneradas) ? [...cuotaItem.cuotasGeneradas] : [cuotaItem.cuotaActual];
+
+    // Si aún quedan cuotas por facturar, generar el movimiento de gasto de la siguiente cuota
+    if (cuotaItem.cuotaActual < cuotaItem.totalCuotas) {
+      const siguienteCuota = cuotaItem.cuotaActual + 1;
+      if (!generadas.includes(siguienteCuota)) {
+        generadas.push(siguienteCuota);
+        const nuevoMovCuota = {
+          id: `trans_cuota_${cuotaItem.id}_${siguienteCuota}_${Date.now()}`,
+          tipo: 'gasto',
+          monto: cuotaItem.valorCuotaMensual,
+          descripcion: `${cuotaItem.concepto} (Cuota ${siguienteCuota}/${cuotaItem.totalCuotas})`,
+          nota: `Compra en cuotas • Total: ${formatoMoneda(cuotaItem.montoTotal, cuotaItem.moneda || 'PEN')}`,
+          categoria: cuotaItem.categoria || 'Compras',
+          fecha: getFechaLocalHoy(),
+          moneda: cuotaItem.moneda || 'PEN',
+          esCredito: true,
+          tarjetaId: cuotaItem.tarjetaId,
+          metodo: cuotaItem.tarjetaNombre,
+          cuotaId: cuotaItem.id,
+          numeroCuota: siguienteCuota
+        };
+        setTransacciones(prev => [nuevoMovCuota, ...prev]);
+      }
+    }
+
+    setTarjetas(prev => prev.map(t => {
+      if (t.id === cuotaItem.tarjetaId) {
+        return { ...t, deudaActual: Math.max(0, (t.deudaActual || 0) - montoAmortizado) };
+      }
+      return t;
+    }));
+
+    setCuotasTarjetas(prev => prev.map(c => {
+      if (c.id === id) {
+        return {
+          ...c,
+          cuotaActual: esUltimaCuota ? c.totalCuotas : c.cuotaActual + 1,
+          cuotasGeneradas: generadas,
+          saldoPendiente: esUltimaCuota ? 0 : nuevoSaldo,
+          montoPagado: Number(c.montoPagado || 0) + montoAmortizado,
+          cuotasPagadas: Number(c.cuotasPagadas || 0) + 1,
+          completada: esUltimaCuota
+        };
+      }
+      return c;
+    }));
+  };
+
   const eliminarCompraCuotas = (id) => {
     const cuotaItem = cuotasTarjetas.find(c => c.id === id);
-    if (cuotaItem) {
-      setTarjetas(prev => prev.map(t => {
-        if (t.id === cuotaItem.tarjetaId) {
-          return { ...t, deudaActual: Math.max(0, (t.deudaActual || 0) - cuotaItem.valorCuotaMensual) };
+    if (!cuotaItem) return;
+
+    abrirConfirmacion({
+      titulo: 'Eliminar compra en cuotas',
+      mensaje: `¿Deseas eliminar "${cuotaItem.concepto}"? Si tiene saldo pendiente sin pagar, se descontará únicamente ese saldo de la tarjeta.`,
+      textoConfirmar: 'Eliminar registro',
+      variante: 'danger',
+      onConfirm: () => {
+        const saldoPendienteReal = cuotaItem.completada
+          ? 0
+          : Math.max(0, Number(cuotaItem.saldoPendiente ?? 0));
+
+        if (saldoPendienteReal > 0.01) {
+          setTarjetas(prev => prev.map(t => {
+            if (t.id === cuotaItem.tarjetaId) {
+              return { ...t, deudaActual: Math.max(0, (t.deudaActual || 0) - saldoPendienteReal) };
+            }
+            return t;
+          }));
         }
-        return t;
-      }));
-    }
-    setCuotasTarjetas(prev => prev.filter(c => c.id !== id));
+        setTransacciones(prev => prev.filter(t => t.cuotaId !== id));
+        setCuotasTarjetas(prev => prev.filter(c => c.id !== id));
+        mostrarAviso('Registro de cuotas eliminado.', 'ok');
+      }
+    });
   };
 
   const eliminarTarjeta = (id) => {
-    setTarjetas(prev => prev.filter(t => t.id !== id));
+    const tarj = tarjetas.find(t => t.id === id);
+    abrirConfirmacion({
+      titulo: 'Eliminar tarjeta de crédito',
+      mensaje: `¿Seguro que deseas eliminar la tarjeta "${tarj?.nombre || 'seleccionada'}"?`,
+      textoConfirmar: 'Eliminar tarjeta',
+      variante: 'danger',
+      onConfirm: () => {
+        setTarjetas(prev => prev.filter(t => t.id !== id));
+        mostrarAviso('Tarjeta eliminada.', 'ok');
+      }
+    });
   };
 
   const registrarPagoTarjeta = (e) => {
@@ -1151,16 +1952,48 @@ export default function App() {
       fecha,
       moneda: cta.moneda || 'PEN',
       cuentaId: cta.id,
+      tarjetaId: tarj.id,
       metodo: cta.nombre
     };
 
     setTransacciones(prev => [pagoMov, ...prev]);
+
+    const montoEnMonedaTarjeta = convertirMoneda(monto, cta.moneda || 'PEN', tarj.moneda || 'PEN');
+
     setTarjetas(prev => prev.map(t => {
       if (t.id === tarj.id) {
-        const montoEnMonedaTarjeta = convertirMoneda(monto, cta.moneda || 'PEN', t.moneda || 'PEN');
         return { ...t, deudaActual: Math.max(0, (t.deudaActual || 0) - montoEnMonedaTarjeta) };
       }
       return t;
+    }));
+
+    // Aplicar el pago de la tarjeta también a las compras en cuotas pendientes de esa tarjeta
+    let remanentePago = montoEnMonedaTarjeta;
+    setCuotasTarjetas(prev => prev.map(c => {
+      if (c.tarjetaId !== tarj.id || c.completada || remanentePago <= 0.01) return c;
+
+      const saldoActualCuota = Math.max(0, Number(c.saldoPendiente ?? 0));
+      if (saldoActualCuota <= 0.01) return c;
+
+      const abonoAplicado = Math.min(remanentePago, saldoActualCuota);
+      remanentePago -= abonoAplicado;
+
+      const nuevoSaldo = Math.max(0, saldoActualCuota - abonoAplicado);
+      const nuevoMontoPagado = Number(c.montoPagado || 0) + abonoAplicado;
+      const nuevasCuotasPagadas = Math.floor((nuevoMontoPagado + 0.01) / c.valorCuotaMensual);
+      const esCompletada = nuevoSaldo <= 0.01;
+      const nuevaCuotaActual = esCompletada
+        ? c.totalCuotas
+        : Math.min(c.totalCuotas, (c.cuotaInicial || 1) + nuevasCuotasPagadas);
+
+      return {
+        ...c,
+        cuotaActual: nuevaCuotaActual,
+        saldoPendiente: esCompletada ? 0 : nuevoSaldo,
+        montoPagado: nuevoMontoPagado,
+        cuotasPagadas: nuevasCuotasPagadas,
+        completada: esCompletada
+      };
     }));
 
     setMostrarModalPagoTarjeta(false);
@@ -1206,7 +2039,17 @@ export default function App() {
   };
 
   const eliminarPrestamo = (id) => {
-    setPrestamos(prev => prev.filter(p => p.id !== id));
+    const prest = prestamos.find(p => p.id === id);
+    abrirConfirmacion({
+      titulo: 'Eliminar préstamo',
+      mensaje: `¿Seguro que deseas eliminar "${prest?.nombre || 'este préstamo'}"?`,
+      textoConfirmar: 'Eliminar préstamo',
+      variante: 'danger',
+      onConfirm: () => {
+        setPrestamos(prev => prev.filter(p => p.id !== id));
+        mostrarAviso('Préstamo eliminado.', 'ok');
+      }
+    });
   };
 
   const registrarAbonoPrestamo = (e) => {
@@ -1228,6 +2071,7 @@ export default function App() {
       fecha,
       moneda: cta.moneda || 'PEN',
       cuentaId: cta.id,
+      prestamoId: prest.id,
       metodo: cta.nombre
     };
 
@@ -1290,7 +2134,126 @@ export default function App() {
   };
 
   const eliminarRecurrente = (id) => {
-    setRecurrentes(prev => prev.filter(r => r.id !== id));
+    const rec = recurrentes.find(r => r.id === id);
+    abrirConfirmacion({
+      titulo: 'Eliminar movimiento recurrente',
+      mensaje: `¿Deseas eliminar la recurrencia "${rec?.descripcion || ''}"?`,
+      textoConfirmar: 'Eliminar',
+      variante: 'danger',
+      onConfirm: () => {
+        setRecurrentes(prev => prev.filter(r => r.id !== id));
+        mostrarAviso('Recurrencia eliminada.', 'ok');
+      }
+    });
+  };
+
+  // Metas de Ahorro Handlers
+  const guardarMeta = (e) => {
+    e.preventDefault();
+    const objetivo = parseFloat(montoObjetivoMetaForm);
+    const inicial = parseFloat(montoInicialMetaForm) || 0;
+    if (!nombreMetaForm.trim() || !objetivo || objetivo <= 0) return;
+
+    const nuevaMeta = {
+      id: `meta_${Date.now()}`,
+      nombre: nombreMetaForm.trim(),
+      montoObjetivo: objetivo,
+      montoActual: Math.max(0, inicial),
+      fechaLimite: fechaLimiteMetaForm || '',
+      moneda: monedaMetaForm,
+      color: colorMetaForm
+    };
+
+    setMetas(prev => [...prev, nuevaMeta]);
+    setMostrarModalMeta(false);
+    setNombreMetaForm('');
+    setMontoObjetivoMetaForm('');
+    setMontoInicialMetaForm('');
+    setFechaLimiteMetaForm('');
+    mostrarAviso('Meta de ahorro creada.', 'ok');
+  };
+
+  const registrarAporteMeta = (e) => {
+    e.preventDefault();
+    const monto = parseFloat(montoAporteMetaForm);
+    if (!monto || monto <= 0 || !metaSeleccionadaId) return;
+
+    const meta = metas.find(m => m.id === metaSeleccionadaId);
+    if (!meta) return;
+
+    const cta = descontarCuentaMeta ? cuentasConSaldosActuales.find(c => c.id === cuentaAporteMetaId) : null;
+    const monedaAporte = cta ? (cta.moneda || 'PEN') : (meta.moneda || moneda);
+    const montoEnMonedaMeta = convertirMoneda(monto, monedaAporte, meta.moneda || 'PEN');
+
+    setMetas(prev => prev.map(m => {
+      if (m.id === meta.id) {
+        return { ...m, montoActual: (m.montoActual || 0) + montoEnMonedaMeta };
+      }
+      return m;
+    }));
+
+    if (cta) {
+      const movAporte = {
+        id: `meta_mov_${Date.now()}`,
+        tipo: 'aporte_meta',
+        monto,
+        descripcion: `Aporte a Meta: ${meta.nombre}`,
+        categoria: 'Otros Gastos',
+        fecha: getFechaLocalHoy(),
+        moneda: monedaAporte,
+        cuentaId: cta.id,
+        metaId: meta.id,
+        metodo: cta.nombre
+      };
+      setTransacciones(prev => [movAporte, ...prev]);
+    }
+
+    setMostrarModalAporteMeta(false);
+    setMontoAporteMetaForm('');
+    mostrarAviso(`Aporte registrado en "${meta.nombre}".`, 'ok');
+  };
+
+  const eliminarMeta = (id) => {
+    const meta = metas.find(m => m.id === id);
+    abrirConfirmacion({
+      titulo: 'Eliminar meta de ahorro',
+      mensaje: `¿Seguro que deseas eliminar la meta "${meta?.nombre || ''}"?`,
+      textoConfirmar: 'Eliminar meta',
+      variante: 'danger',
+      onConfirm: () => {
+        setMetas(prev => prev.filter(m => m.id !== id));
+        mostrarAviso('Meta de ahorro eliminada.', 'ok');
+      }
+    });
+  };
+
+  // Cambio de Moneda Principal con opción de convertir importes o solo visualización
+  const handleCambiarMonedaPrincipal = (nuevaMoneda) => {
+    if (nuevaMoneda === moneda) return;
+    const monedaAnterior = moneda;
+
+    abrirConfirmacion({
+      titulo: `Cambiar moneda principal a ${nuevaMoneda}`,
+      mensaje: `¿Deseas convertir también tus presupuestos y metas de ${monedaAnterior} a ${nuevaMoneda} usando el tipo de cambio configurado, o solo cambiar la moneda de visualización de los reportes?`,
+      textoConfirmar: `Convertir a ${nuevaMoneda}`,
+      variante: 'primary',
+      onConfirm: () => {
+        if (presupuestoGlobal > 0) {
+          setPresupuestoGlobal(Math.round(convertirMoneda(presupuestoGlobal, monedaAnterior, nuevaMoneda) * 100) / 100);
+        }
+        if (Object.keys(presupuestos).length > 0) {
+          const convertidos = {};
+          Object.entries(presupuestos).forEach(([cat, lim]) => {
+            convertidos[cat] = Math.round(convertirMoneda(lim, monedaAnterior, nuevaMoneda) * 100) / 100;
+          });
+          setPresupuestos(convertidos);
+        }
+        setMoneda(nuevaMoneda);
+        mostrarAviso(`Moneda principal actualizada y presupuestos convertidos a ${nuevaMoneda}.`, 'ok');
+      }
+    });
+    // Cambiar inmediatamente la visualización; si el usuario confirma, además convierte presupuestos
+    setMoneda(nuevaMoneda);
   };
 
   const procesarRecurrente = (rec) => {
@@ -1332,6 +2295,52 @@ export default function App() {
       moneda
     };
 
+    const nuevosMovsCierre = [];
+    const mesSiguienteObj = new Date(anioSeleccionado, mesSeleccionado + 1, 1);
+    const diasEnMesSig = new Date(mesSiguienteObj.getFullYear(), mesSiguienteObj.getMonth() + 1, 0).getDate();
+
+    // Avanzar al siguiente período las compras en cuotas activas al cerrar el mes y generar su gasto
+    setCuotasTarjetas(prev => prev.map(c => {
+      if (c.completada || c.ultimoCierreAplicado === clavePeriodo) return c;
+      if (c.cuotaActual >= c.totalCuotas) return c;
+
+      const siguienteCuota = c.cuotaActual + 1;
+      const generadas = Array.isArray(c.cuotasGeneradas) ? [...c.cuotasGeneradas] : [c.cuotaActual];
+
+      if (!generadas.includes(siguienteCuota)) {
+        generadas.push(siguienteCuota);
+        const diaValido = Math.min(c.diaFacturacion || 1, diasEnMesSig);
+        const fechaSigMes = `${mesSiguienteObj.getFullYear()}-${String(mesSiguienteObj.getMonth() + 1).padStart(2, '0')}-${String(diaValido).padStart(2, '0')}`;
+
+        nuevosMovsCierre.push({
+          id: `trans_cuota_${c.id}_${siguienteCuota}_${Date.now()}`,
+          tipo: 'gasto',
+          monto: c.valorCuotaMensual,
+          descripcion: `${c.concepto} (Cuota ${siguienteCuota}/${c.totalCuotas})`,
+          nota: `Compra en cuotas • Total: ${formatoMoneda(c.montoTotal, c.moneda || 'PEN')}`,
+          categoria: c.categoria || 'Compras',
+          fecha: fechaSigMes,
+          moneda: c.moneda || 'PEN',
+          esCredito: true,
+          tarjetaId: c.tarjetaId,
+          metodo: c.tarjetaNombre,
+          cuotaId: c.id,
+          numeroCuota: siguienteCuota
+        });
+      }
+
+      return {
+        ...c,
+        cuotaActual: siguienteCuota,
+        cuotasGeneradas: generadas,
+        ultimoCierreAplicado: clavePeriodo
+      };
+    }));
+
+    if (nuevosMovsCierre.length > 0) {
+      setTransacciones(prev => [...nuevosMovsCierre, ...prev]);
+    }
+
     setCierresHistoricos(prev => [nuevoCierre, ...prev.filter(c => c.periodo !== clavePeriodo)]);
     setMostrarModalCierre(false);
   };
@@ -1363,29 +2372,152 @@ export default function App() {
   };
 
   const importarRespaldo = (e) => {
-    const file = e.target.files[0];
+    const file = e.target.files?.[0];
     if (!file) return;
 
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
-        const imported = JSON.parse(event.target.result);
-        if (imported.transacciones) setTransacciones(imported.transacciones);
-        if (imported.cuentasBancarias) setCuentasBancarias(imported.cuentasBancarias);
-        if (imported.tarjetas) setTarjetas(imported.tarjetas);
-        if (imported.cuotasTarjetas) setCuotasTarjetas(imported.cuotasTarjetas);
-        if (imported.prestamos) setPrestamos(imported.prestamos);
-        if (imported.presupuestos) setPresupuestos(imported.presupuestos);
-        if (imported.presupuestoGlobal) setPresupuestoGlobal(imported.presupuestoGlobal);
-        if (imported.recurrentes) setRecurrentes(imported.recurrentes);
-        if (imported.metas) setMetas(imported.metas);
-        if (imported.catGastosPers) setCatGastosPers(imported.catGastosPers);
-        if (imported.catIngresosPers) setCatIngresosPers(imported.catIngresosPers);
-        if (imported.cierresHistoricos) setCierresHistoricos(imported.cierresHistoricos);
-        setMensajeRespaldo({ tipo: 'ok', texto: '¡Respaldo importado con éxito!' });
+        const rawText = event.target?.result;
+        if (typeof rawText !== 'string' || !rawText.trim()) {
+          throw new Error('Archivo vacío');
+        }
+
+        const imported = JSON.parse(rawText);
+
+        // Validar que sea un objeto JSON plano (no null, primitivo ni arreglo)
+        if (!esObjetoPlano(imported)) {
+          throw new Error('El contenido del archivo no corresponde a un objeto de respaldo válido.');
+        }
+
+        // Comprobar que incluya al menos una clave esperada de respaldo de la aplicación
+        const clavesEsperadas = [
+          'transacciones',
+          'cuentasBancarias',
+          'tarjetas',
+          'cuotasTarjetas',
+          'prestamos',
+          'presupuestos',
+          'presupuestoGlobal',
+          'recurrentes',
+          'metas',
+          'moneda',
+          'tiposCambio',
+          'catGastosPers',
+          'catIngresosPers',
+          'cierresHistoricos'
+        ];
+        const tieneClaveValida = clavesEsperadas.some((clave) => Object.prototype.hasOwnProperty.call(imported, clave));
+        if (!tieneClaveValida) {
+          throw new Error('El archivo JSON no contiene datos reconocibles de esta aplicación.');
+        }
+
+        // Validar y sanear cada sección antes de mutar el estado
+        const nuevasTrans = imported.transacciones !== undefined ? sanearArrayObjetos(imported.transacciones, sanearTransaccion) : null;
+        if (imported.transacciones !== undefined && nuevasTrans === null) {
+          throw new Error('Formato inválido en la lista de transacciones.');
+        }
+
+        const nuevasCuentas = imported.cuentasBancarias !== undefined ? sanearArrayObjetos(imported.cuentasBancarias, sanearCuenta) : null;
+        if (imported.cuentasBancarias !== undefined && nuevasCuentas === null) {
+          throw new Error('Formato inválido en las cuentas bancarias.');
+        }
+
+        const nuevasTarjetas = imported.tarjetas !== undefined ? sanearArrayObjetos(imported.tarjetas, sanearTarjeta) : null;
+        if (imported.tarjetas !== undefined && nuevasTarjetas === null) {
+          throw new Error('Formato inválido en las tarjetas.');
+        }
+
+        const nuevasCuotas = imported.cuotasTarjetas !== undefined ? sanearArrayObjetos(imported.cuotasTarjetas, sanearCuotaTarjeta) : null;
+        if (imported.cuotasTarjetas !== undefined && nuevasCuotas === null) {
+          throw new Error('Formato inválido en las compras en cuotas.');
+        }
+
+        const nuevosPrestamos = imported.prestamos !== undefined ? sanearArrayObjetos(imported.prestamos, sanearPrestamo) : null;
+        if (imported.prestamos !== undefined && nuevosPrestamos === null) {
+          throw new Error('Formato inválido en los préstamos.');
+        }
+
+        const nuevosRecurrentes = imported.recurrentes !== undefined ? sanearArrayObjetos(imported.recurrentes, sanearRecurrente) : null;
+        if (imported.recurrentes !== undefined && nuevosRecurrentes === null) {
+          throw new Error('Formato inválido en los movimientos recurrentes.');
+        }
+
+        const nuevosCierres = imported.cierresHistoricos !== undefined ? sanearArrayObjetos(imported.cierresHistoricos, sanearCierre) : null;
+        if (imported.cierresHistoricos !== undefined && nuevosCierres === null) {
+          throw new Error('Formato inválido en el historial de cierres.');
+        }
+
+        let nuevosPresupuestos = null;
+        if (imported.presupuestos !== undefined) {
+          if (!esObjetoPlano(imported.presupuestos)) {
+            throw new Error('Formato inválido en los presupuestos.');
+          }
+          nuevosPresupuestos = {};
+          Object.entries(imported.presupuestos).forEach(([cat, limite]) => {
+            const num = Number(limite);
+            if (typeof cat === 'string' && cat.trim() && Number.isFinite(num) && num > 0) {
+              nuevosPresupuestos[cat] = num;
+            }
+          });
+        }
+
+        let nuevoPresupuestoGlobal = null;
+        if (imported.presupuestoGlobal !== undefined) {
+          const pgNum = Number(imported.presupuestoGlobal);
+          if (!Number.isFinite(pgNum) || pgNum < 0) {
+            throw new Error('Formato inválido en el presupuesto global.');
+          }
+          nuevoPresupuestoGlobal = pgNum;
+        }
+
+        let nuevosTiposCambio = null;
+        if (imported.tiposCambio !== undefined) {
+          if (!esObjetoPlano(imported.tiposCambio)) {
+            throw new Error('Formato inválido en los tipos de cambio.');
+          }
+          nuevosTiposCambio = { ...TIPOS_CAMBIO_DEFECTO };
+          Object.keys(TIPOS_CAMBIO_DEFECTO).forEach((k) => {
+            const val = Number(imported.tiposCambio[k]);
+            if (Number.isFinite(val) && val > 0) nuevosTiposCambio[k] = val;
+          });
+        }
+
+        const nuevasCatGastos = imported.catGastosPers !== undefined ? sanearArrayStrings(imported.catGastosPers) : null;
+        const nuevasCatIngresos = imported.catIngresosPers !== undefined ? sanearArrayStrings(imported.catIngresosPers) : null;
+
+        // Aplicar cambios ya validados
+        if (nuevasTrans) setTransacciones(nuevasTrans);
+        if (nuevasCuentas) setCuentasBancarias(nuevasCuentas);
+        if (nuevasTarjetas) setTarjetas(nuevasTarjetas);
+        if (nuevasCuotas) setCuotasTarjetas(nuevasCuotas);
+        if (nuevosPrestamos) setPrestamos(nuevosPrestamos);
+        if (nuevosPresupuestos) setPresupuestos(nuevosPresupuestos);
+        if (nuevoPresupuestoGlobal !== null) setPresupuestoGlobal(nuevoPresupuestoGlobal);
+        if (nuevosRecurrentes) setRecurrentes(nuevosRecurrentes);
+        if (imported.metas !== undefined) {
+          const nuevasMetas = sanearArrayObjetos(imported.metas, sanearMeta);
+          if (nuevasMetas) setMetas(nuevasMetas);
+        }
+        if (nuevasCatGastos && nuevasCatGastos.length > 0) setCatGastosPers(nuevasCatGastos);
+        if (nuevasCatIngresos && nuevasCatIngresos.length > 0) setCatIngresosPers(nuevasCatIngresos);
+        if (nuevosCierres) setCierresHistoricos(nuevosCierres);
+        if (MONEDAS_VALIDAS.includes(imported.moneda)) setMoneda(imported.moneda);
+        if (nuevosTiposCambio) setTiposCambio(nuevosTiposCambio);
+
+        setMensajeRespaldo({ tipo: 'ok', texto: '¡Respaldo importado y verificado con éxito!' });
       } catch (err) {
-        setMensajeRespaldo({ tipo: 'error', texto: 'Archivo de respaldo no válido.' });
+        setMensajeRespaldo({
+          tipo: 'error',
+          texto: `Archivo de respaldo no válido: ${err?.message || 'formato JSON incorrecto'}. No se modificaron tus datos actuales.`
+        });
+      } finally {
+        e.target.value = '';
       }
+    };
+    reader.onerror = () => {
+      setMensajeRespaldo({ tipo: 'error', texto: 'No se pudo leer el archivo seleccionado.' });
+      e.target.value = '';
     };
     reader.readAsText(file);
   };
@@ -1401,6 +2533,713 @@ export default function App() {
     a.href = url;
     a.download = `movimientos_${user.username}_${getFechaLocalHoy()}.csv`;
     a.click();
+  };
+
+  // Generación de Reporte PDF limpio e imprimible con todos los apartados configurables
+  const generarReportePDF = () => {
+    const escaparHtml = (str) =>
+      String(str ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+
+    const fechaGeneracion = new Date().toLocaleDateString('es-PE', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+
+    // 1. Determinar rango de fechas y etiqueta del período
+    let etiquetaPeriodo = '';
+    let fechaDesde = '';
+    let fechaHasta = '';
+
+    if (pdfTipoPeriodo === 'mes') {
+      etiquetaPeriodo = `${NOMBRES_MESES[mesSeleccionado]} ${anioSeleccionado}`;
+      const ultimoDia = new Date(anioSeleccionado, mesSeleccionado + 1, 0).getDate();
+      fechaDesde = `${anioSeleccionado}-${String(mesSeleccionado + 1).padStart(2, '0')}-01`;
+      fechaHasta = `${anioSeleccionado}-${String(mesSeleccionado + 1).padStart(2, '0')}-${String(ultimoDia).padStart(2, '0')}`;
+    } else if (pdfTipoPeriodo === 'anio') {
+      etiquetaPeriodo = `Año Completo ${anioSeleccionado}`;
+      fechaDesde = `${anioSeleccionado}-01-01`;
+      fechaHasta = `${anioSeleccionado}-12-31`;
+    } else {
+      fechaDesde = pdfFechaInicio || getFechaLocalHoy();
+      fechaHasta = pdfFechaFin || fechaDesde;
+      if (fechaDesde > fechaHasta) {
+        const tmp = fechaDesde;
+        fechaDesde = fechaHasta;
+        fechaHasta = tmp;
+      }
+      etiquetaPeriodo = `Del ${fechaDesde} al ${fechaHasta}`;
+    }
+
+    // Filtrar transacciones dentro del período
+    const movsPeriodo = transacciones
+      .filter((t) => {
+        const f = (t.fecha || '').slice(0, 10);
+        return f >= fechaDesde && f <= fechaHasta;
+      })
+      .sort((a, b) => (a.fecha || '').localeCompare(b.fecha || ''));
+
+    // 2. Calcular Resumen del período
+    let ingresosP = 0;
+    let gastosLiquidosP = 0;
+    let gastosCreditoP = 0;
+    let otrosEgresosLiquidosP = 0;
+    const gastosPorCatMap = {};
+
+    movsPeriodo.forEach((t) => {
+      const montoConv = convertirMoneda(t.monto, t.moneda || 'PEN', moneda);
+      if (t.tipo === 'ingreso') {
+        ingresosP += montoConv;
+      } else if (t.tipo === 'gasto') {
+        if (t.esCredito) {
+          gastosCreditoP += montoConv;
+        } else {
+          gastosLiquidosP += montoConv;
+        }
+        const cat = t.categoria || 'Otros Gastos';
+        gastosPorCatMap[cat] = (gastosPorCatMap[cat] || 0) + montoConv;
+      } else if (t.tipo === 'pago_tarjeta' || t.tipo === 'pago_prestamo' || t.tipo === 'aporte_meta') {
+        otrosEgresosLiquidosP += montoConv;
+      }
+    });
+
+    const gastosTotalesP = gastosLiquidosP + gastosCreditoP;
+    const balanceP = ingresosP - gastosTotalesP;
+    const pctAhorroP = ingresosP > 0 ? Math.round((balanceP / ingresosP) * 1000) / 10 : 0;
+
+    // Comparativa con el mes anterior (cuando aplica)
+    let bloqueComparativaHtml = '';
+    if (pdfCompararAnterior && pdfTipoPeriodo === 'mes') {
+      const mesAnt = mesSeleccionado === 0 ? 11 : mesSeleccionado - 1;
+      const anioAnt = mesSeleccionado === 0 ? anioSeleccionado - 1 : anioSeleccionado;
+      let ingAnt = 0;
+      let gasAnt = 0;
+
+      transacciones.forEach((t) => {
+        const [yS, mS] = (t.fecha || '').split('-');
+        if (parseInt(yS, 10) === anioAnt && parseInt(mS, 10) - 1 === mesAnt) {
+          const mc = convertirMoneda(t.monto, t.moneda || 'PEN', moneda);
+          if (t.tipo === 'ingreso') ingAnt += mc;
+          else if (t.tipo === 'gasto') gasAnt += mc;
+        }
+      });
+
+      const balAnt = ingAnt - gasAnt;
+      const diffIng = ingresosP - ingAnt;
+      const diffGas = gastosTotalesP - gasAnt;
+      const diffBal = balanceP - balAnt;
+      const fmtDelta = (val, invertirColor = false) => {
+        const signo = val > 0 ? '+' : '';
+        const positivo = invertirColor ? val <= 0 : val >= 0;
+        const color = positivo ? '#059669' : '#dc2626';
+        return `<span style="color:${color};font-weight:700;">${signo}${escaparHtml(formatoMoneda(val, moneda))}</span>`;
+      };
+
+      bloqueComparativaHtml = `
+        <div class="compare-box">
+          <div class="compare-title">Comparativa frente al mes anterior (${escaparHtml(NOMBRES_MESES[mesAnt])} ${anioAnt})</div>
+          <div class="compare-grid">
+            <div>Ingresos mes anterior: <strong>${escaparHtml(formatoMoneda(ingAnt, moneda))}</strong> (${fmtDelta(diffIng)})</div>
+            <div>Gastos mes anterior: <strong>${escaparHtml(formatoMoneda(gasAnt, moneda))}</strong> (${fmtDelta(diffGas, true)})</div>
+            <div>Balance mes anterior: <strong>${escaparHtml(formatoMoneda(balAnt, moneda))}</strong> (${fmtDelta(diffBal)})</div>
+          </div>
+        </div>
+      `;
+    }
+
+    // 3. Tabla de Gastos por Categoría y Presupuestos
+    const categoriasOrdenadas = Object.entries(gastosPorCatMap).sort((a, b) => b[1] - a[1]);
+    // Incluir categorías que tengan presupuesto definido aunque el gasto sea 0 en el período
+    Object.keys(presupuestos).forEach((catPres) => {
+      if (!Object.prototype.hasOwnProperty.call(gastosPorCatMap, catPres)) {
+        categoriasOrdenadas.push([catPres, 0]);
+      }
+    });
+
+    const multiplicadorPresupuesto = pdfTipoPeriodo === 'anio' ? 12 : 1;
+    const filasCategoriasHtml =
+      categoriasOrdenadas.length === 0
+        ? `<tr><td colspan="5" class="empty">No se registraron gastos por categoría en este período.</td></tr>`
+        : categoriasOrdenadas
+            .map(([cat, montoCat]) => {
+              const pctTotal = gastosTotalesP > 0 ? ((montoCat / gastosTotalesP) * 100).toFixed(1) : '0.0';
+              const limiteBase = Number(presupuestos[cat] || 0);
+              const limiteAplicable = limiteBase * multiplicadorPresupuesto;
+              let colPresupuesto = '<span class="muted">Sin límite</span>';
+              let colEstado = '<span class="muted">—</span>';
+
+              if (limiteAplicable > 0) {
+                const pctUso = Math.round((montoCat / limiteAplicable) * 100);
+                const excedido = montoCat > limiteAplicable;
+                colPresupuesto = `${escaparHtml(formatoMoneda(montoCat, moneda))} / ${escaparHtml(formatoMoneda(limiteAplicable, moneda))}`;
+                colEstado = `<span class="badge ${excedido ? 'badge-danger' : pctUso >= 80 ? 'badge-warn' : 'badge-ok'}">${pctUso}% ${excedido ? '(Excedido)' : ''}</span>`;
+              }
+
+              return `
+                <tr>
+                  <td><strong>${escaparHtml(cat)}</strong></td>
+                  <td class="num">${escaparHtml(formatoMoneda(montoCat, moneda))}</td>
+                  <td class="num">${pctTotal}%</td>
+                  <td class="num">${colPresupuesto}</td>
+                  <td class="center">${colEstado}</td>
+                </tr>
+              `;
+            })
+            .join('');
+
+    // 4. Detalle de Movimientos ordenados por fecha con totales al final
+    let totalEntradasDetalle = 0;
+    let totalSalidasDetalle = 0;
+
+    const filasMovimientosHtml =
+      movsPeriodo.length === 0
+        ? `<tr><td colspan="5" class="empty">No hay movimientos registrados en el período seleccionado.</td></tr>`
+        : movsPeriodo
+            .map((t) => {
+              const esEntrada = t.tipo === 'ingreso' || t.tipo === 'transferencia_entrada';
+              const esTransferencia = t.tipo === 'transferencia_salida' || t.tipo === 'transferencia_entrada';
+              const montoConv = convertirMoneda(t.monto, t.moneda || 'PEN', moneda);
+
+              if (!esTransferencia) {
+                if (esEntrada) totalEntradasDetalle += montoConv;
+                else totalSalidasDetalle += montoConv;
+              }
+
+              const etiquetaExtra = t.esCredito
+                ? ' [Crédito]'
+                : esTransferencia
+                  ? ' [Transferencia]'
+                  : '';
+              const textoMontoOriginal =
+                (t.moneda || 'PEN') !== moneda
+                  ? ` <span class="muted">(${escaparHtml(formatoMoneda(t.monto, t.moneda))})</span>`
+                  : '';
+
+              return `
+                <tr>
+                  <td class="nowrap">${escaparHtml(t.fecha)}</td>
+                  <td>
+                    ${escaparHtml(t.descripcion || 'Movimiento')}${etiquetaExtra}
+                    ${t.nota ? `<div class="subnote">${escaparHtml(t.nota)}</div>` : ''}
+                  </td>
+                  <td>${escaparHtml(t.categoria || '—')}</td>
+                  <td>${escaparHtml(t.metodo || '—')}</td>
+                  <td class="num ${esTransferencia ? 'txt-blue' : esEntrada ? 'txt-green' : 'txt-red'}">
+                    ${esEntrada ? '+' : '-'}${escaparHtml(formatoMoneda(montoConv, moneda))}${textoMontoOriginal}
+                  </td>
+                </tr>
+              `;
+            })
+            .join('');
+
+    // OPCIONAL A: Saldos por Cuenta, Deudas y Próximos Vencimientos
+    let seccionCuentasDeudasHtml = '';
+    if (pdfIncluirCuentasDeudas) {
+      const filasCuentas =
+        cuentasConSaldosActuales.length === 0
+          ? `<tr><td colspan="4" class="empty">Sin cuentas registradas.</td></tr>`
+          : cuentasConSaldosActuales
+              .map((c) => {
+                const conv = convertirMoneda(c.saldoActual, c.moneda || 'PEN', moneda);
+                return `
+                  <tr>
+                    <td><strong>${escaparHtml(c.nombre)}</strong></td>
+                    <td>${escaparHtml(c.tipo || 'Bancaria')}</td>
+                    <td>${escaparHtml(c.moneda || 'PEN')}</td>
+                    <td class="num ${c.saldoActual < 0 ? 'txt-red' : 'txt-green'}">
+                      ${escaparHtml(formatoMoneda(c.saldoActual, c.moneda || 'PEN'))}
+                      ${(c.moneda || 'PEN') !== moneda ? `<span class="muted"> (≈ ${escaparHtml(formatoMoneda(conv, moneda))})</span>` : ''}
+                    </td>
+                  </tr>
+                `;
+              })
+              .join('');
+
+      const deudasLista = [
+        ...tarjetas.map((t) => ({
+          tipo: 'Tarjeta de Crédito',
+          nombre: t.nombre,
+          vencimiento: t.diaVencimiento ? `Día ${t.diaVencimiento} de cada mes` : 'Sin fecha definida',
+          saldo: t.deudaActual || 0,
+          monedaItem: t.moneda || 'PEN',
+          detalle: `Límite: ${formatoMoneda(t.limite || 0, t.moneda || 'PEN')}`
+        })),
+        ...prestamos
+          .filter((p) => (p.montoPendiente || 0) > 0)
+          .map((p) => ({
+            tipo: p.tipo === 'otorgado' ? 'Préstamo por Cobrar' : 'Préstamo por Pagar',
+            nombre: `${p.nombre} (${p.entidad})`,
+            vencimiento: p.diaVencimiento ? `Día ${p.diaVencimiento}` : 'Sin fecha fija',
+            saldo: p.montoPendiente || 0,
+            monedaItem: p.moneda || 'PEN',
+            detalle: `Total: ${formatoMoneda(p.montoTotal || 0, p.moneda || 'PEN')}`
+          }))
+      ];
+
+      const filasDeudas =
+        deudasLista.length === 0
+          ? `<tr><td colspan="4" class="empty">Sin deudas de tarjetas ni préstamos activos.</td></tr>`
+          : deudasLista
+              .map(
+                (d) => `
+                  <tr>
+                    <td><strong>${escaparHtml(d.nombre)}</strong><div class="subnote">${escaparHtml(d.tipo)} • ${escaparHtml(d.detalle)}</div></td>
+                    <td>${escaparHtml(d.vencimiento)}</td>
+                    <td>${escaparHtml(d.monedaItem)}</td>
+                    <td class="num ${d.tipo === 'Préstamo por Cobrar' ? 'txt-green' : 'txt-red'}">${escaparHtml(formatoMoneda(d.saldo, d.monedaItem))}</td>
+                  </tr>
+                `
+              )
+              .join('');
+
+      const vencimientosHtml =
+        proximosVencimientos.length > 0
+          ? `<div class="alert-box"><strong>Próximos vencimientos detectados:</strong> ${proximosVencimientos
+              .map(
+                (v) =>
+                  `${escaparHtml(v.tipo)} ${escaparHtml(v.nombre)} (${
+                    v.vencido ? `Vencido hace ${Math.abs(v.dias)}d` : v.dias === 0 ? 'Vence hoy' : `en ${v.dias}d - Día ${v.diaPago}`
+                  }: ${escaparHtml(v.montoTexto)})`
+              )
+              .join(' • ')}</div>`
+          : '';
+
+      seccionCuentasDeudasHtml = `
+        <section class="section">
+          <h2>5. Saldos por Cuenta, Deudas y Vencimientos</h2>
+          <p class="section-desc">Liquidez total consolidada: <strong>${escaparHtml(formatoMoneda(saldoLiquidoTotal, moneda))}</strong> • Deuda total en tarjetas: <strong>${escaparHtml(formatoMoneda(resumenTarjetas.deudaTotal, moneda))}</strong></p>
+          <table>
+            <thead>
+              <tr>
+                <th>Cuenta / Billetera</th>
+                <th>Tipo</th>
+                <th>Moneda</th>
+                <th class="num">Saldo Actual</th>
+              </tr>
+            </thead>
+            <tbody>${filasCuentas}</tbody>
+          </table>
+          <div style="height:10px;"></div>
+          <table>
+            <thead>
+              <tr>
+                <th>Tarjeta / Préstamo</th>
+                <th>Vencimiento</th>
+                <th>Moneda</th>
+                <th class="num">Saldo Pendiente</th>
+              </tr>
+            </thead>
+            <tbody>${filasDeudas}</tbody>
+          </table>
+          ${vencimientosHtml}
+        </section>
+      `;
+    }
+
+    // OPCIONAL B: Resumen Anual mes a mes
+    let seccionAnualHtml = '';
+    if (pdfIncluirResumenAnual) {
+      const filasAnual = resumenAnual.meses
+        .map(
+          (m) => `
+            <tr>
+              <td><strong>${escaparHtml(m.mes)}</strong></td>
+              <td class="num txt-green">${escaparHtml(formatoMoneda(m.ingresos, moneda))}</td>
+              <td class="num">${escaparHtml(formatoMoneda(m.gastosLiquidos, moneda))}</td>
+              <td class="num">${escaparHtml(formatoMoneda(m.gastosCredito, moneda))}</td>
+              <td class="num txt-red">${escaparHtml(formatoMoneda(m.gastosTotales, moneda))}</td>
+              <td class="num ${m.balance >= 0 ? 'txt-green' : 'txt-red'}">${escaparHtml(formatoMoneda(m.balance, moneda))}</td>
+            </tr>
+          `
+        )
+        .join('');
+
+      seccionAnualHtml = `
+        <section class="section">
+          <h2>${pdfIncluirCuentasDeudas ? '6' : '5'}. Evolución Anual (${anioSeleccionado})</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Mes</th>
+                <th class="num">Ingresos</th>
+                <th class="num">Gastos Líquidos</th>
+                <th class="num">Crédito</th>
+                <th class="num">Total Gastos</th>
+                <th class="num">Balance Neto</th>
+              </tr>
+            </thead>
+            <tbody>${filasAnual}</tbody>
+            <tfoot>
+              <tr>
+                <td><strong>TOTAL ${anioSeleccionado}</strong></td>
+                <td class="num txt-green"><strong>${escaparHtml(formatoMoneda(resumenAnual.totalIngresosAnio, moneda))}</strong></td>
+                <td class="num"><strong>${escaparHtml(formatoMoneda(resumenAnual.totalLiquidoAnio, moneda))}</strong></td>
+                <td class="num"><strong>${escaparHtml(formatoMoneda(resumenAnual.totalCreditoAnio, moneda))}</strong></td>
+                <td class="num txt-red"><strong>${escaparHtml(formatoMoneda(resumenAnual.totalGastosAnio, moneda))}</strong></td>
+                <td class="num ${resumenAnual.ahorroNetoAnio >= 0 ? 'txt-green' : 'txt-red'}"><strong>${escaparHtml(formatoMoneda(resumenAnual.ahorroNetoAnio, moneda))} (${resumenAnual.tasaAhorroAnio}%)</strong></td>
+              </tr>
+            </tfoot>
+          </table>
+        </section>
+      `;
+    }
+
+    // OPCIONAL C: Metas de Ahorro
+    let seccionMetasHtml = '';
+    if (pdfIncluirMetas) {
+      const numSec = 5 + (pdfIncluirCuentasDeudas ? 1 : 0) + (pdfIncluirResumenAnual ? 1 : 0);
+      const filasMetas =
+        metas.length === 0
+          ? `<tr><td colspan="5" class="empty">No hay metas de ahorro registradas.</td></tr>`
+          : metas
+              .map((m) => {
+                const pct = m.montoObjetivo > 0 ? Math.min(100, Math.round(((m.montoActual || 0) / m.montoObjetivo) * 100)) : 0;
+                const faltante = Math.max(0, (m.montoObjetivo || 0) - (m.montoActual || 0));
+                return `
+                  <tr>
+                    <td><strong>${escaparHtml(m.nombre)}</strong>${m.fechaLimite ? `<div class="subnote">Fecha límite: ${escaparHtml(m.fechaLimite)}</div>` : ''}</td>
+                    <td class="num txt-green">${escaparHtml(formatoMoneda(m.montoActual || 0, m.moneda || 'PEN'))}</td>
+                    <td class="num">${escaparHtml(formatoMoneda(m.montoObjetivo || 0, m.moneda || 'PEN'))}</td>
+                    <td class="num">${escaparHtml(formatoMoneda(faltante, m.moneda || 'PEN'))}</td>
+                    <td class="center"><strong>${pct}%</strong></td>
+                  </tr>
+                `;
+              })
+              .join('');
+
+      seccionMetasHtml = `
+        <section class="section">
+          <h2>${numSec}. Metas de Ahorro</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Meta / Objetivo</th>
+                <th class="num">Ahorrado</th>
+                <th class="num">Objetivo</th>
+                <th class="num">Faltante</th>
+                <th class="center">Avance</th>
+              </tr>
+            </thead>
+            <tbody>${filasMetas}</tbody>
+          </table>
+        </section>
+      `;
+    }
+
+    const htmlDocumento = `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Reporte Financiero - ${escaparHtml(etiquetaPeriodo)}</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: #1e293b;
+      margin: 0;
+      padding: 24px 32px;
+      font-size: 11px;
+      line-height: 1.45;
+      background: #ffffff;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      border-bottom: 2px solid #4f46e5;
+      padding-bottom: 14px;
+      margin-bottom: 18px;
+    }
+    .header h1 {
+      margin: 0 0 4px 0;
+      font-size: 20px;
+      color: #0f172a;
+    }
+    .header .subtitle {
+      color: #475569;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .meta-box {
+      text-align: right;
+      font-size: 10.5px;
+      color: #475569;
+    }
+    .meta-box strong { color: #0f172a; }
+    .section {
+      margin-bottom: 20px;
+      page-break-inside: avoid;
+    }
+    .section-break {
+      margin-bottom: 20px;
+    }
+    h2 {
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: #312e81;
+      border-bottom: 1px solid #e2e8f0;
+      padding-bottom: 4px;
+      margin: 0 0 10px 0;
+    }
+    .section-desc {
+      margin: 0 0 8px 0;
+      color: #475569;
+      font-size: 11px;
+    }
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .kpi-card {
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 10px 12px;
+      background: #f8fafc;
+    }
+    .kpi-label {
+      font-size: 9.5px;
+      text-transform: uppercase;
+      color: #64748b;
+      font-weight: 700;
+    }
+    .kpi-value {
+      font-size: 15px;
+      font-weight: 800;
+      margin-top: 3px;
+      color: #0f172a;
+    }
+    .kpi-sub {
+      font-size: 9.5px;
+      color: #64748b;
+      margin-top: 2px;
+    }
+    .compare-box {
+      background: #eef2ff;
+      border: 1px solid #c7d2fe;
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 10.5px;
+    }
+    .compare-title {
+      font-weight: 700;
+      color: #3730a3;
+      margin-bottom: 4px;
+    }
+    .compare-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 10.5px;
+    }
+    th, td {
+      border-bottom: 1px solid #e2e8f0;
+      padding: 6px 8px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: #f1f5f9;
+      color: #334155;
+      font-weight: 700;
+      text-transform: uppercase;
+      font-size: 9.5px;
+    }
+    tfoot td {
+      background: #f8fafc;
+      border-top: 2px solid #cbd5e1;
+      border-bottom: 2px solid #cbd5e1;
+    }
+    .num { text-align: right; white-space: nowrap; }
+    .center { text-align: center; }
+    .nowrap { white-space: nowrap; }
+    .empty { text-align: center; color: #94a3b8; padding: 14px; font-style: italic; }
+    .muted { color: #64748b; font-size: 9.5px; }
+    .subnote { color: #64748b; font-size: 9.5px; margin-top: 1px; }
+    .txt-green { color: #059669; font-weight: 700; }
+    .txt-red { color: #dc2626; font-weight: 700; }
+    .txt-blue { color: #2563eb; font-weight: 700; }
+    .badge {
+      display: inline-block;
+      padding: 2px 6px;
+      border-radius: 999px;
+      font-size: 9px;
+      font-weight: 700;
+    }
+    .badge-ok { background: #d1fae5; color: #065f46; }
+    .badge-warn { background: #fef3c7; color: #92400e; }
+    .badge-danger { background: #fee2e2; color: #991b1b; }
+    .alert-box {
+      margin-top: 8px;
+      padding: 8px 10px;
+      background: #fffbeb;
+      border: 1px solid #fde68a;
+      border-radius: 6px;
+      font-size: 10px;
+      color: #92400e;
+    }
+    .no-print-bar {
+      background: #1e293b;
+      color: #ffffff;
+      padding: 10px 16px;
+      border-radius: 10px;
+      margin-bottom: 18px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 12px;
+    }
+    .no-print-bar button {
+      background: #4f46e5;
+      color: #ffffff;
+      border: none;
+      padding: 7px 14px;
+      border-radius: 8px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    @media print {
+      body { padding: 0; }
+      .no-print-bar { display: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="no-print-bar">
+    <span>Vista previa lista para guardar como PDF (en el cuadro de impresión elige <strong>"Guardar como PDF"</strong>).</span>
+    <button onclick="window.print()">Imprimir / Guardar PDF</button>
+  </div>
+
+  <!-- 1. ENCABEZADO -->
+  <header class="header">
+    <div>
+      <h1>Reporte Financiero Personal</h1>
+      <div class="subtitle">Período: ${escaparHtml(etiquetaPeriodo)}</div>
+    </div>
+    <div class="meta-box">
+      <div>Usuario: <strong>@${escaparHtml(user.username)}</strong></div>
+      <div>Moneda del reporte: <strong>${escaparHtml(moneda)}</strong></div>
+      <div>Generado el: <strong>${escaparHtml(fechaGeneracion)}</strong></div>
+    </div>
+  </header>
+
+  <!-- 2. RESUMEN DEL PERÍODO -->
+  <section class="section">
+    <h2>2. Resumen del Período</h2>
+    <div class="kpi-grid">
+      <div class="kpi-card">
+        <div class="kpi-label">Ingresos Totales</div>
+        <div class="kpi-value txt-green">${escaparHtml(formatoMoneda(ingresosP, moneda))}</div>
+        <div class="kpi-sub">${movsPeriodo.filter((m) => m.tipo === 'ingreso').length} ingresos registrados</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Gastos Totales</div>
+        <div class="kpi-value txt-red">${escaparHtml(formatoMoneda(gastosTotalesP, moneda))}</div>
+        <div class="kpi-sub">Líquido: ${escaparHtml(formatoMoneda(gastosLiquidosP, moneda))} | Crédito: ${escaparHtml(formatoMoneda(gastosCreditoP, moneda))}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Balance Neto</div>
+        <div class="kpi-value ${balanceP >= 0 ? 'txt-green' : 'txt-red'}">${escaparHtml(formatoMoneda(balanceP, moneda))}</div>
+        <div class="kpi-sub">Pagos deuda/metas: ${escaparHtml(formatoMoneda(otrosEgresosLiquidosP, moneda))}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Porcentaje Ahorrado</div>
+        <div class="kpi-value ${pctAhorroP >= 0 ? 'txt-green' : 'txt-red'}">${pctAhorroP}%</div>
+        <div class="kpi-sub">${ingresosP > 0 ? 'Respecto a tus ingresos' : 'Sin ingresos en el período'}</div>
+      </div>
+    </div>
+    ${bloqueComparativaHtml}
+  </section>
+
+  <!-- 3. GASTOS POR CATEGORÍA Y PRESUPUESTOS -->
+  <section class="section">
+    <h2>3. Gastos por Categoría y Presupuestos</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Categoría</th>
+          <th class="num">Gastado</th>
+          <th class="num">% del Total</th>
+          <th class="num">Gastado / Límite</th>
+          <th class="center">Estado Presupuesto</th>
+        </tr>
+      </thead>
+      <tbody>${filasCategoriasHtml}</tbody>
+      <tfoot>
+        <tr>
+          <td><strong>TOTAL GASTOS POR CATEGORÍA</strong></td>
+          <td class="num txt-red"><strong>${escaparHtml(formatoMoneda(gastosTotalesP, moneda))}</strong></td>
+          <td class="num"><strong>100%</strong></td>
+          <td class="num" colspan="2">${presupuestoGlobal > 0 ? `Límite global mensual: ${escaparHtml(formatoMoneda(presupuestoGlobal * multiplicadorPresupuesto, moneda))}` : ''}</td>
+        </tr>
+      </tfoot>
+    </table>
+  </section>
+
+  <!-- 4. DETALLE DE MOVIMIENTOS -->
+  <section class="section-break">
+    <h2>4. Detalle de Movimientos (${movsPeriodo.length})</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Fecha</th>
+          <th>Concepto</th>
+          <th>Categoría</th>
+          <th>Cuenta / Tarjeta</th>
+          <th class="num">Monto (${escaparHtml(moneda)})</th>
+        </tr>
+      </thead>
+      <tbody>${filasMovimientosHtml}</tbody>
+      <tfoot>
+        <tr>
+          <td colspan="4"><strong>TOTALES DEL PERÍODO (Entradas: ${escaparHtml(formatoMoneda(totalEntradasDetalle, moneda))} | Salidas: ${escaparHtml(formatoMoneda(totalSalidasDetalle, moneda))})</strong></td>
+          <td class="num ${totalEntradasDetalle - totalSalidasDetalle >= 0 ? 'txt-green' : 'txt-red'}">
+            <strong>Neto: ${escaparHtml(formatoMoneda(totalEntradasDetalle - totalSalidasDetalle, moneda))}</strong>
+          </td>
+        </tr>
+      </tfoot>
+    </table>
+  </section>
+
+  ${seccionCuentasDeudasHtml}
+  ${seccionAnualHtml}
+  ${seccionMetasHtml}
+</body>
+</html>`;
+
+    const ventanaImpresion = window.open('', '_blank', 'width=980,height=780');
+    if (!ventanaImpresion) {
+      mostrarAviso('Tu navegador bloqueó la ventana emergente del PDF. Permite ventanas emergentes e inténtalo de nuevo.', 'error');
+      return;
+    }
+
+    ventanaImpresion.document.open();
+    ventanaImpresion.document.write(htmlDocumento);
+    ventanaImpresion.document.close();
+
+    setTimeout(() => {
+      try {
+        ventanaImpresion.focus();
+        ventanaImpresion.print();
+      } catch (e) {
+        // El usuario puede pulsar el botón manual dentro de la ventana
+      }
+    }, 350);
+
+    setMostrarModalPdf(false);
+    mostrarAviso('Reporte PDF generado. Elige "Guardar como PDF" en la ventana de impresión.', 'ok');
   };
 
   if (!user) {
@@ -1487,6 +3326,26 @@ export default function App() {
               </>
             )}
 
+            <div className="p-3 bg-indigo-50/70 border border-indigo-100 rounded-xl space-y-1.5">
+              <label className="block text-xs font-bold text-indigo-900 flex items-center gap-1.5">
+                <DollarSign className="w-3.5 h-3.5 text-indigo-600" />
+                Moneda Principal con la que deseas iniciar
+              </label>
+              <select
+                value={monedaInicioForm}
+                onChange={(e) => setMonedaInicioForm(e.target.value)}
+                className="w-full px-3 py-2 bg-white border border-indigo-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                <option value="PEN">PEN — Soles Peruanos (S/)</option>
+                <option value="USD">USD — Dólares Americanos ($)</option>
+                <option value="EUR">EUR — Euros (€)</option>
+                <option value="CLP">CLP — Pesos Chilenos ($)</option>
+              </select>
+              <p className="text-[10px] text-indigo-700/80">
+                Todos tus totales y reportes se mostrarán en esta moneda (puedes cambiarla luego en Configuración).
+              </p>
+            </div>
+
             {modoAuth === 'login' && (
               <div className="text-right">
                 <button
@@ -1518,12 +3377,14 @@ export default function App() {
               type="button"
               onClick={() => {
                 const demoUser = { username: 'demo', uid: 'usr_demo_guest' };
+                saveUserData('demo', 'moneda', monedaInicioForm);
+                setMoneda(monedaInicioForm);
                 localStorage.setItem('finanzas_active_user', JSON.stringify(demoUser));
                 setUser(demoUser);
               }}
               className="w-full py-2 bg-emerald-50 text-emerald-700 font-bold border border-emerald-200 rounded-xl text-xs hover:bg-emerald-100 transition-colors flex items-center justify-center gap-1.5"
             >
-              <Sparkles className="w-4 h-4 text-emerald-600" /> Probar con Usuario Demo
+              <Sparkles className="w-4 h-4 text-emerald-600" /> Probar con Usuario Demo ({monedaInicioForm})
             </button>
           </div>
 
@@ -1551,90 +3412,209 @@ export default function App() {
             </button>
           </div>
         </div>
-      </div>
-    );
-  }
 
-  // Comprobar alertas de presupuesto global
-  const sobrepasoPresupuestoGlobal = presupuestoGlobal > 0 && resumen.totalGastosDelMes > presupuestoGlobal;
-  const cercaPresupuestoGlobal = presupuestoGlobal > 0 && !sobrepasoPresupuestoGlobal && resumen.totalGastosDelMes >= (presupuestoGlobal * 0.8);
-
-  return (
-    <div className={`min-h-screen transition-colors duration-300 ${darkMode ? 'bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-800'} font-sans p-4 sm:p-6 lg:p-8`}>
-      <div className="max-w-7xl mx-auto space-y-6">
-        
-        {/* BARRA SUPERIOR DE USUARIO */}
-        <div className={`${darkMode ? 'bg-slate-900 border border-slate-800' : 'bg-slate-900'} text-white px-6 py-3 rounded-2xl flex flex-wrap justify-between items-center gap-4 shadow-md`}>
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-indigo-600 flex items-center justify-center text-white font-bold">
-              {user.username.charAt(0).toUpperCase()}
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="font-semibold text-sm">
-                  {user.username}
-                </span>
-                <span className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs px-2 py-0.5 rounded-full flex items-center gap-1 font-medium">
-                  <ShieldCheck className="w-3 h-3" /> Sesión Activa
-                </span>
+        {/* MODAL RECUPERAR CONTRASEÑA */}
+        {mostrarModalRecuperar && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4">
+              <div className="flex justify-between items-center border-b pb-3">
+                <h3 className="text-lg font-bold text-slate-900">Recuperar Contraseña</h3>
+                <button onClick={() => setMostrarModalRecuperar(false)} className="text-slate-400 hover:text-slate-600 font-bold">✕</button>
               </div>
-              <p className="text-xs text-slate-400 font-mono tracking-tight mt-0.5">
-                Multi-Cuenta & Multi-Moneda Activas
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3 text-xs text-slate-300">
-            <button
-              onClick={() => setDarkMode(prev => !prev)}
-              className={`p-2 rounded-xl border transition-colors ${darkMode ? 'bg-slate-800 border-slate-700 text-amber-400 hover:bg-slate-700' : 'bg-slate-800 border-slate-700 text-indigo-300 hover:bg-slate-700'}`}
-              title={darkMode ? 'Cambiar a Modo Día' : 'Cambiar a Modo Noche'}
-            >
-              {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-            </button>
-            <button
-              onClick={() => setMostrarModalConfig(true)}
-              className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 rounded-xl font-medium text-slate-200 transition-colors"
-            >
-              <Settings className="w-3.5 h-3.5 text-indigo-400" /> Configuración
-            </button>
-            <button
-              onClick={() => { setMensajeRespaldo(null); setMostrarModalInfoData(true); }}
-              className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 rounded-xl font-medium text-slate-200 transition-colors"
-            >
-              <Database className="w-3.5 h-3.5 text-indigo-400" /> Datos
-            </button>
-            <button 
-              onClick={handleCerrarSesion}
-              className="flex items-center gap-1 bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-xl text-rose-400 font-semibold transition-colors"
-            >
-              <LogOut className="w-4 h-4" /> Salir
-            </button>
-          </div>
-        </div>
-
-        {/* ALERTAS DE PRESUPUESTO GLOBAL */}
-        {sobrepasoPresupuestoGlobal && (
-          <div className="bg-rose-500/10 border border-rose-500/30 p-4 rounded-2xl flex items-center gap-3 text-rose-500">
-            <AlertTriangle className="w-6 h-6 shrink-0 animate-bounce" />
-            <div>
-              <h4 className="font-bold text-sm">¡Presupuesto Global Excedido!</h4>
-              <p className="text-xs text-rose-400">
-                Has gastado {formatoMoneda(resumen.totalGastosDelMes)} en {NOMBRES_MESES[mesSeleccionado]}, superando el límite mensual de {formatoMoneda(presupuestoGlobal)}.
-              </p>
+              {mensajeRecuperacion && (
+                <div className={`p-3 rounded-xl text-xs font-semibold ${mensajeRecuperacion.tipo === 'ok' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-600'}`}>
+                  {mensajeRecuperacion.texto}
+                </div>
+              )}
+              {pasoRecuperacion === 1 ? (
+                <form onSubmit={handleBuscarUsuarioRecuperacion} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1">Ingresa tu nombre de usuario</label>
+                    <input
+                      type="text"
+                      required
+                      value={userRecuperar}
+                      onChange={(e) => setUserRecuperar(e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm"
+                    />
+                  </div>
+                  <button type="submit" className="w-full py-2.5 bg-indigo-600 text-white font-bold rounded-xl text-sm">Buscar Usuario</button>
+                </form>
+              ) : (
+                <form onSubmit={handleRestablecerPassword} className="space-y-4">
+                  <p className="text-xs font-semibold text-slate-700">{preguntaUsuario}</p>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Tu respuesta secreta..."
+                    value={respuestaRecuperar}
+                    onChange={(e) => setRespuestaRecuperar(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm"
+                  />
+                  <input
+                    type="password"
+                    required
+                    placeholder="Nueva contraseña..."
+                    value={nuevaPasswordForm}
+                    onChange={(e) => setNuevaPasswordForm(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm"
+                  />
+                  <button type="submit" className="w-full py-2.5 bg-emerald-600 text-white font-bold rounded-xl text-sm">Restablecer Contraseña</button>
+                </form>
+              )}
             </div>
           </div>
         )}
 
-        {cercaPresupuestoGlobal && (
-          <div className="bg-amber-500/10 border border-amber-500/30 p-4 rounded-2xl flex items-center gap-3 text-amber-500">
-            <AlertCircle className="w-6 h-6 shrink-0" />
-            <div>
-              <h4 className="font-bold text-sm">Atención: Cerca del Límite Global de Gastos</h4>
-              <p className="text-xs text-amber-400">
-                Has consumido más del 80% de tu presupuesto mensual ({formatoMoneda(resumen.totalGastosDelMes)} de {formatoMoneda(presupuestoGlobal)}).
+        {/* MODAL BORRAR CACHÉ DESDE LOGIN */}
+        {mostrarModalBorrarCache && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4 text-slate-800">
+              <h3 className="text-lg font-bold text-rose-600 flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5" /> Borrar Caché y Datos Locales
+              </h3>
+              <p className="text-xs text-slate-600">
+                Esta acción eliminará todos los usuarios y movimientos guardados en este navegador. Escribe <strong>BORRAR</strong> para confirmar:
               </p>
+              <input
+                type="text"
+                placeholder="BORRAR"
+                value={confirmarTextoBorrar}
+                onChange={(e) => setConfirmarTextoBorrar(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm"
+              />
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setMostrarModalBorrarCache(false)}
+                  className="flex-1 py-2 border border-slate-200 rounded-xl text-xs font-bold"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={confirmarTextoBorrar !== 'BORRAR'}
+                  onClick={handleBorrarCachePagina}
+                  className="flex-1 py-2 bg-rose-600 disabled:opacity-40 text-white rounded-xl text-xs font-bold"
+                >
+                  Eliminar Todo
+                </button>
+              </div>
             </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className={`min-h-screen p-4 sm:p-6 transition-colors ${darkMode ? 'bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-800'}`}>
+      <div className="max-w-7xl mx-auto space-y-6">
+        {/* BARRA SUPERIOR DE USUARIO, RESPALDOS Y CONFIGURACIÓN */}
+        <div className={`px-4 py-3 rounded-2xl border flex flex-wrap items-center justify-between gap-3 ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-bold text-xs uppercase">
+              {user.username.slice(0, 2)}
+            </div>
+            <div>
+              <span className="text-xs font-bold block">@{user.username}</span>
+              <span className="text-[10px] text-slate-400">Moneda base: {moneda}</span>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={exportarRespaldo}
+              className={`px-3 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 ${darkMode ? 'bg-slate-800 border-slate-700 text-slate-200 hover:bg-slate-700' : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'}`}
+              title="Exportar respaldo JSON"
+            >
+              <Download className="w-3.5 h-3.5 text-indigo-500" /> Respaldo
+            </button>
+
+            <label
+              className={`px-3 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 cursor-pointer ${darkMode ? 'bg-slate-800 border-slate-700 text-slate-200 hover:bg-slate-700' : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'}`}
+              title="Importar respaldo JSON"
+            >
+              <Upload className="w-3.5 h-3.5 text-emerald-500" /> Importar
+              <input type="file" accept=".json,application/json" onChange={importarRespaldo} className="hidden" />
+            </label>
+
+            <button
+              type="button"
+              onClick={exportarCSV}
+              className={`px-3 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 ${darkMode ? 'bg-slate-800 border-slate-700 text-slate-200 hover:bg-slate-700' : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'}`}
+            >
+              <Database className="w-3.5 h-3.5 text-blue-500" /> CSV
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setPdfTipoPeriodo('mes');
+                const ultimoDia = new Date(anioSeleccionado, mesSeleccionado + 1, 0).getDate();
+                setPdfFechaInicio(`${anioSeleccionado}-${String(mesSeleccionado + 1).padStart(2, '0')}-01`);
+                setPdfFechaFin(`${anioSeleccionado}-${String(mesSeleccionado + 1).padStart(2, '0')}-${String(ultimoDia).padStart(2, '0')}`);
+                setMostrarModalPdf(true);
+              }}
+              className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-colors"
+              title="Generar Reporte PDF personalizable"
+            >
+              <FileText className="w-3.5 h-3.5" /> Reporte PDF
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setMostrarModalConfig(true)}
+              className={`px-3 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 ${darkMode ? 'bg-slate-800 border-slate-700 text-slate-200 hover:bg-slate-700' : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'}`}
+            >
+              <Settings className="w-3.5 h-3.5 text-indigo-500" /> Config
+            </button>
+
+            <button
+              type="button"
+              onClick={handleCerrarSesion}
+              className="px-3 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 border border-rose-500/30 text-xs font-semibold flex items-center gap-1.5"
+            >
+              <LogOut className="w-3.5 h-3.5" /> Salir
+            </button>
+          </div>
+        </div>
+
+        {mensajeRespaldo && (
+          <div className={`p-3 rounded-xl border text-xs font-semibold flex items-center justify-between ${
+            mensajeRespaldo.tipo === 'ok'
+              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+              : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+          }`}>
+            <span>{mensajeRespaldo.texto}</span>
+            <button type="button" onClick={() => setMensajeRespaldo(null)} className="font-bold ml-3">✕</button>
+          </div>
+        )}
+
+        {/* AVISO DE MES CERRADO */}
+        {cierreMesActual && (
+          <div className="bg-emerald-500/10 border border-emerald-500/30 p-3.5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-emerald-400">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 bg-emerald-500/20 rounded-xl shrink-0">
+                <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+              </div>
+              <div>
+                <h4 className="font-bold text-sm text-emerald-300">
+                  Mes Cerrado ({cierreMesActual.periodo})
+                </h4>
+                <p className="text-xs text-slate-400">
+                  Corte realizado el <strong className="text-slate-300">{cierreMesActual.fechaCierre}</strong> • Balance archivado: <strong className={cierreMesActual.balanceNeto >= 0 ? 'text-emerald-400' : 'text-rose-400'}>{formatoMoneda(cierreMesActual.balanceNeto, cierreMesActual.moneda)}</strong>
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setMostrarModalInfoData(true)}
+              className="text-xs font-semibold px-3 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 self-start sm:self-center transition-colors"
+            >
+              Ver Bitácora de Cierres
+            </button>
           </div>
         )}
 
@@ -1779,6 +3759,20 @@ export default function App() {
           >
             <HandCoins className="w-4 h-4" />
             Préstamos ({prestamos.length})
+          </button>
+          <button
+            onClick={() => setSeccionActiva('metas')}
+            className={`flex-1 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition-all ${seccionActiva === 'metas' ? (darkMode ? 'bg-slate-800 text-emerald-400 shadow' : 'bg-white text-emerald-600 shadow-sm') : 'text-slate-400 hover:text-slate-200'}`}
+          >
+            <PiggyBank className="w-4 h-4" />
+            Metas ({metas.length})
+          </button>
+          <button
+            onClick={() => setSeccionActiva('anual')}
+            className={`flex-1 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition-all ${seccionActiva === 'anual' ? (darkMode ? 'bg-slate-800 text-indigo-400 shadow' : 'bg-white text-indigo-600 shadow-sm') : 'text-slate-400 hover:text-slate-200'}`}
+          >
+            <BarChart3 className="w-4 h-4" />
+            Resumen Anual
           </button>
           <button
             onClick={() => setSeccionActiva('auditoria')}
@@ -2188,6 +4182,8 @@ export default function App() {
                         setMontoTotalCuotaForm('');
                         setNumCuotasForm('3');
                         setCuotaActualForm('1');
+                        setCategoriaCuotaForm(catGastosPers.includes('Compras') ? 'Compras' : (catGastosPers[0] || 'Compras'));
+                        setFechaCuotaForm(getFechaLocalHoy());
                         setMostrarModalCuotaTarjeta(true);
                       }}
                       className="flex-1 sm:flex-initial bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20 px-3 py-1.5 rounded-xl font-semibold text-xs flex items-center justify-center gap-1 border border-indigo-500/30 transition-colors"
@@ -2301,47 +4297,103 @@ export default function App() {
 
             {/* LISTADO DE COMPRAS EN CUOTAS */}
             <div className="pt-4 border-t border-slate-700/50 space-y-3">
-              <h4 className={`font-bold text-sm flex items-center gap-2 ${darkMode ? 'text-slate-200' : 'text-slate-800'}`}>
-                <Clock className="w-4 h-4 text-indigo-400" />
-                Consumos Fraccionados en Cuotas ({cuotasTarjetas.length})
-              </h4>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <h4 className={`font-bold text-sm flex items-center gap-2 ${darkMode ? 'text-slate-200' : 'text-slate-800'}`}>
+                  <Clock className="w-4 h-4 text-indigo-400" />
+                  Consumos Fraccionados en Cuotas ({cuotasTarjetas.length})
+                </h4>
+                <span className="text-[11px] text-slate-400">
+                  Se actualizan automáticamente cada mes calendario y al pagar tu tarjeta.
+                </span>
+              </div>
 
               {cuotasTarjetas.length === 0 ? (
                 <p className="text-xs text-slate-400">No tienes compras en cuotas registradas actualmente.</p>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {cuotasTarjetas.map(c => (
-                    <div key={c.id} className={`p-4 rounded-xl border relative group ${darkMode ? 'bg-slate-800/60 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
-                      <button
-                        onClick={() => eliminarCompraCuotas(c.id)}
-                        className="absolute top-3 right-3 text-slate-400 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-opacity"
-                        title="Eliminar registro de cuotas"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                  {cuotasTarjetas.map(c => {
+                    const saldoPendienteItem = c.saldoPendiente ?? ((c.totalCuotas - c.cuotaActual + 1) * c.valorCuotaMensual);
+                    const estaPagada = c.completada || saldoPendienteItem <= 0.01;
+                    // Proyección de la cuota según el mes y año seleccionados en el navegador superior
+                    const [yReg, mReg] = (c.fechaRegistro || getFechaLocalHoy()).split('-').map(Number);
+                    const diffMesesVista = !isNaN(yReg) && !isNaN(mReg)
+                      ? (anioSeleccionado * 12 + mesSeleccionado) - (yReg * 12 + (mReg - 1))
+                      : 0;
+                    const cuotaEnMesSeleccionado = Math.min(
+                      c.totalCuotas,
+                      Math.max(1, (c.cuotaInicial || c.cuotaActual) + diffMesesVista)
+                    );
 
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="text-[10px] bg-indigo-500/20 text-indigo-300 font-bold px-2 py-0.5 rounded">
-                          {c.tarjetaNombre}
-                        </span>
-                        <span className="text-[10px] bg-slate-700 text-slate-300 px-2 py-0.5 rounded font-mono">
-                          Cuota {c.cuotaActual} de {c.totalCuotas}
-                        </span>
-                      </div>
+                    return (
+                      <div key={c.id} className={`p-4 rounded-xl border relative flex flex-col justify-between ${darkMode ? 'bg-slate-800/60 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                        <button
+                          type="button"
+                          onClick={() => eliminarCompraCuotas(c.id)}
+                          className="absolute top-2.5 right-2.5 p-2 rounded-lg text-slate-400 hover:text-rose-500 active:text-rose-500 hover:bg-rose-500/10 active:bg-rose-500/15 transition-colors touch-manipulation"
+                          title="Eliminar registro de cuotas"
+                          aria-label="Eliminar registro de cuotas"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
 
-                      <h5 className={`font-bold text-sm mb-1 ${darkMode ? 'text-slate-100' : 'text-slate-800'}`}>{c.concepto}</h5>
-
-                      <div className="flex justify-between items-end mt-2 pt-2 border-t border-slate-700/40 text-xs">
                         <div>
-                          <span className="text-slate-400 block text-[10px]">Valor Cuota Mensual:</span>
-                          <strong className="text-indigo-400 text-sm font-black">{formatoMoneda(c.valorCuotaMensual, c.moneda)}</strong>
+                          <div className="flex items-center gap-2 mb-1 flex-wrap pr-9">
+                            <span className="text-[10px] bg-indigo-500/20 text-indigo-300 font-bold px-2 py-0.5 rounded">
+                              {c.tarjetaNombre}
+                            </span>
+                            {c.categoria && (
+                              <span className="text-[10px] bg-purple-500/20 text-purple-300 font-medium px-2 py-0.5 rounded">
+                                {c.categoria}
+                              </span>
+                            )}
+                            <span className={`text-[10px] px-2 py-0.5 rounded font-mono ${estaPagada ? 'bg-emerald-500/20 text-emerald-400 font-bold' : 'bg-slate-700 text-slate-300'}`}>
+                              {estaPagada ? '✓ Completada' : `Cuota ${c.cuotaActual} de ${c.totalCuotas}`}
+                            </span>
+                            {!estaPagada && diffMesesVista > 0 && cuotaEnMesSeleccionado > c.cuotaActual && (
+                              <span className="text-[10px] bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded font-mono">
+                                En {NOMBRES_MESES[mesSeleccionado]}: {cuotaEnMesSeleccionado}/{c.totalCuotas}
+                              </span>
+                            )}
+                          </div>
+
+                          <h5 className={`font-bold text-sm mb-2 ${darkMode ? 'text-slate-100' : 'text-slate-800'}`}>{c.concepto}</h5>
+
+                          <div className="space-y-1 text-xs bg-slate-900/30 p-2.5 rounded-lg border border-slate-700/30">
+                            <div className="flex justify-between">
+                              <span className="text-slate-400">Cuota Mensual:</span>
+                              <strong className="text-indigo-400 font-bold">{formatoMoneda(c.valorCuotaMensual, c.moneda)}</strong>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-slate-400">Saldo en Línea:</span>
+                              <strong className={estaPagada ? 'text-emerald-400' : 'text-rose-400'}>
+                                {formatoMoneda(saldoPendienteItem, c.moneda)}
+                              </strong>
+                            </div>
+                            <div className="flex justify-between text-[10px] text-slate-400 pt-1 border-t border-slate-700/30">
+                              <span>Monto Total Compra:</span>
+                              <span className="font-mono">{formatoMoneda(c.montoTotal, c.moneda)}</span>
+                            </div>
+                          </div>
                         </div>
-                        <span className="text-slate-400 text-[10px] font-mono">
-                          Total: {formatoMoneda(c.montoTotal, c.moneda)}
-                        </span>
+
+                        <div className="mt-3 pt-2 border-t border-slate-700/40 flex justify-end">
+                          {estaPagada ? (
+                            <span className="text-[11px] font-bold text-emerald-400 flex items-center gap-1">
+                              <CheckCircle2 className="w-3.5 h-3.5" /> Pagada en su totalidad
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => avanzarCuotaTarjeta(c.id)}
+                              className="w-full py-1.5 px-3 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" /> Avanzar / Pagar 1 cuota
+                            </button>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -2496,6 +4548,305 @@ export default function App() {
           </section>
         )}
 
+        {/* VISTA HISTORIAL PAGOS AUDITORÍA */}
+        {seccionActiva === 'auditoria' && (
+          <section className={`p-6 rounded-2xl shadow-sm border space-y-4 ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100'}`}>
+            <div>
+              <h3 className={`text-lg font-bold flex items-center gap-2 ${darkMode ? 'text-slate-100' : 'text-slate-800'}`}>
+                <History className="w-5 h-5 text-emerald-500" />
+                Historial de Amortizaciones de Tarjetas y Préstamos ({historialPagosEspeciales.length})
+              </h3>
+              <p className="text-xs text-slate-400">Auditoría completa de pagos efectuados hacia tus líneas de crédito y préstamos.</p>
+            </div>
+            {historialPagosEspeciales.length === 0 ? (
+              <p className="text-sm text-slate-400 py-4">Aún no has registrado abonos a tarjetas o préstamos.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse text-sm">
+                  <thead>
+                    <tr className={`border-b text-xs uppercase ${darkMode ? 'border-slate-800 text-slate-400' : 'border-slate-100 text-slate-500'}`}>
+                      <th className="py-3 px-4">Fecha</th>
+                      <th className="py-3 px-4">Concepto</th>
+                      <th className="py-3 px-4">Cuenta Origen</th>
+                      <th className="py-3 px-4 text-right">Monto Abonado</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {historialPagosEspeciales.map(p => (
+                      <tr key={p.id} className={darkMode ? 'border-slate-800' : 'border-slate-50'}>
+                        <td className="py-3 px-4 text-xs text-slate-400">{p.fecha}</td>
+                        <td className="py-3 px-4 font-semibold">{p.descripcion}</td>
+                        <td className="py-3 px-4 text-xs text-slate-400">{p.metodo}</td>
+                        <td className="py-3 px-4 text-right font-bold text-emerald-400">{formatoMoneda(p.monto, p.moneda || 'PEN')}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* VISTA DEDICADA METAS DE AHORRO */}
+        {seccionActiva === 'metas' && (
+          <section className={`p-6 rounded-2xl shadow-sm border space-y-5 ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100'}`}>
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+              <div>
+                <h3 className={`text-lg font-bold flex items-center gap-2 ${darkMode ? 'text-slate-100' : 'text-slate-800'}`}>
+                  <PiggyBank className="w-5 h-5 text-emerald-500" />
+                  Metas de Ahorro y Objetivos Financieros ({metas.length})
+                </h3>
+                <p className="text-xs text-slate-400">Define tus objetivos de ahorro, registra aportes periódicos y visualiza tu progreso.</p>
+              </div>
+              <div className="flex flex-wrap gap-2 w-full sm:w-auto">
+                {metas.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMetaSeleccionadaId(metas[0].id);
+                      if (cuentasBancarias.length > 0) setCuentaAporteMetaId(cuentasBancarias[0].id);
+                      setMontoAporteMetaForm('');
+                      setDescontarCuentaMeta(cuentasBancarias.length > 0);
+                      setMostrarModalAporteMeta(true);
+                    }}
+                    className="flex-1 sm:flex-initial bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 px-3 py-1.5 rounded-xl font-semibold text-xs flex items-center justify-center gap-1 border border-emerald-500/30 transition-colors"
+                  >
+                    <Plus className="w-4 h-4" /> Registrar Aporte
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNombreMetaForm('');
+                    setMontoObjetivoMetaForm('');
+                    setMontoInicialMetaForm('');
+                    setFechaLimiteMetaForm('');
+                    setMonedaMetaForm(moneda);
+                    setColorMetaForm('#10B981');
+                    setMostrarModalMeta(true);
+                  }}
+                  className="flex-1 sm:flex-initial bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-xl font-semibold text-xs flex items-center justify-center gap-1 shadow-sm transition-colors"
+                >
+                  <Plus className="w-4 h-4" /> + Nueva Meta
+                </button>
+              </div>
+            </div>
+
+            {metas.length === 0 ? (
+              <div className={`p-8 text-center border-2 border-dashed rounded-xl text-slate-400 text-sm ${darkMode ? 'border-slate-800' : 'border-slate-200'}`}>
+                Aún no tienes metas de ahorro creadas (ej. Fondo de emergencia, Viaje, Inicial de auto). Haz clic en <strong>+ Nueva Meta</strong> para comenzar.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {metas.map((m) => {
+                  const pct = m.montoObjetivo > 0 ? Math.min(100, Math.round(((m.montoActual || 0) / m.montoObjetivo) * 100)) : 0;
+                  const completada = (m.montoActual || 0) >= m.montoObjetivo && m.montoObjetivo > 0;
+                  const faltante = Math.max(0, (m.montoObjetivo || 0) - (m.montoActual || 0));
+
+                  return (
+                    <div key={m.id} className={`p-5 rounded-2xl border relative flex flex-col justify-between shadow-sm ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                      <button
+                        type="button"
+                        onClick={() => eliminarMeta(m.id)}
+                        className="absolute top-3 right-3 p-2 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-500/10 transition-colors"
+                        title="Eliminar meta"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+
+                      <div>
+                        <div className="flex items-center gap-2 mb-2 pr-8 flex-wrap">
+                          <span className="w-3 h-3 rounded-full" style={{ backgroundColor: m.color || '#10B981' }}></span>
+                          <span className="text-[10px] bg-emerald-500/20 text-emerald-400 font-bold px-2 py-0.5 rounded-full">
+                            {m.moneda || 'PEN'}
+                          </span>
+                          {completada && (
+                            <span className="text-[10px] bg-amber-500/20 text-amber-300 font-bold px-2 py-0.5 rounded-full">
+                              🎉 ¡Meta Lograda!
+                            </span>
+                          )}
+                          {m.fechaLimite && (
+                            <span className="text-[10px] bg-slate-700 text-slate-300 px-2 py-0.5 rounded">
+                              Límite: {m.fechaLimite}
+                            </span>
+                          )}
+                        </div>
+
+                        <h4 className={`font-bold text-base mb-3 ${darkMode ? 'text-slate-100' : 'text-slate-800'}`}>{m.nombre}</h4>
+
+                        <div className="space-y-1 text-xs mb-3">
+                          <div className="flex justify-between">
+                            <span className="text-slate-400">Ahorrado:</span>
+                            <strong className="text-emerald-400 text-sm">{formatoMoneda(m.montoActual || 0, m.moneda || 'PEN')}</strong>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-slate-400">Objetivo:</span>
+                            <span className="font-semibold">{formatoMoneda(m.montoObjetivo || 0, m.moneda || 'PEN')}</span>
+                          </div>
+                          {!completada && (
+                            <div className="flex justify-between text-[11px] text-slate-400">
+                              <span>Faltante:</span>
+                              <span>{formatoMoneda(faltante, m.moneda || 'PEN')}</span>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className={`w-full h-2.5 rounded-full overflow-hidden mb-1.5 ${darkMode ? 'bg-slate-700' : 'bg-slate-200'}`}>
+                          <div
+                            className="h-full transition-all"
+                            style={{ width: `${pct}%`, backgroundColor: m.color || '#10B981' }}
+                          ></div>
+                        </div>
+                        <div className="text-[11px] text-right font-bold text-slate-400">{pct}% completado</div>
+                      </div>
+
+                      <div className="mt-3 pt-2.5 border-t border-slate-700/40">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setMetaSeleccionadaId(m.id);
+                            if (cuentasBancarias.length > 0) setCuentaAporteMetaId(cuentasBancarias[0].id);
+                            setMontoAporteMetaForm('');
+                            setDescontarCuentaMeta(cuentasBancarias.length > 0);
+                            setMostrarModalAporteMeta(true);
+                          }}
+                          className="w-full py-1.5 px-3 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
+                        >
+                          <Plus className="w-3.5 h-3.5" /> Abonar a esta meta
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* VISTA DEDICADA RESUMEN ANUAL */}
+        {seccionActiva === 'anual' && (
+          <section className={`p-6 rounded-2xl shadow-sm border space-y-6 ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100'}`}>
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+              <div>
+                <h3 className={`text-lg font-bold flex items-center gap-2 ${darkMode ? 'text-slate-100' : 'text-slate-800'}`}>
+                  <BarChart3 className="w-5 h-5 text-indigo-500" />
+                  Resumen Financiero Anual — {anioSeleccionado}
+                </h3>
+                <p className="text-xs text-slate-400">Consolidado de ingresos, gastos líquidos, consumo a crédito y ahorro neto mes a mes en {moneda}.</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setAnioSeleccionado(prev => prev - 1)}
+                  className={`px-3 py-1.5 rounded-xl border text-xs font-bold ${darkMode ? 'bg-slate-800 border-slate-700 text-slate-200' : 'bg-slate-100 border-slate-200 text-slate-700'}`}
+                >
+                  ← {anioSeleccionado - 1}
+                </button>
+                <span className="px-3 py-1.5 rounded-xl bg-indigo-600 text-white text-xs font-bold">{anioSeleccionado}</span>
+                <button
+                  type="button"
+                  onClick={() => setAnioSeleccionado(prev => prev + 1)}
+                  className={`px-3 py-1.5 rounded-xl border text-xs font-bold ${darkMode ? 'bg-slate-800 border-slate-700 text-slate-200' : 'bg-slate-100 border-slate-200 text-slate-700'}`}
+                >
+                  {anioSeleccionado + 1} →
+                </button>
+              </div>
+            </div>
+
+            {/* Tarjetas KPI Anuales */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className={`p-4 rounded-xl border ${darkMode ? 'bg-slate-800/70 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                <span className="text-[11px] font-semibold text-slate-400 uppercase">Ingresos Totales {anioSeleccionado}</span>
+                <p className="text-xl font-black text-emerald-500 mt-1">{formatoMoneda(resumenAnual.totalIngresosAnio)}</p>
+              </div>
+              <div className={`p-4 rounded-xl border ${darkMode ? 'bg-slate-800/70 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                <span className="text-[11px] font-semibold text-slate-400 uppercase">Gastos Totales {anioSeleccionado}</span>
+                <p className="text-xl font-black text-rose-500 mt-1">{formatoMoneda(resumenAnual.totalGastosAnio)}</p>
+                <span className="text-[10px] text-slate-400">Líquido: {formatoMoneda(resumenAnual.totalLiquidoAnio)} | Crédito: {formatoMoneda(resumenAnual.totalCreditoAnio)}</span>
+              </div>
+              <div className={`p-4 rounded-xl border ${darkMode ? 'bg-slate-800/70 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                <span className="text-[11px] font-semibold text-slate-400 uppercase">Balance Neto Anual</span>
+                <p className={`text-xl font-black mt-1 ${resumenAnual.ahorroNetoAnio >= 0 ? 'text-indigo-400' : 'text-rose-500'}`}>
+                  {formatoMoneda(resumenAnual.ahorroNetoAnio)}
+                </p>
+              </div>
+              <div className={`p-4 rounded-xl border ${darkMode ? 'bg-slate-800/70 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                <span className="text-[11px] font-semibold text-slate-400 uppercase">Tasa de Ahorro Anual</span>
+                <p className={`text-xl font-black mt-1 ${resumenAnual.tasaAhorroAnio >= 0 ? 'text-emerald-400' : 'text-rose-500'}`}>
+                  {resumenAnual.tasaAhorroAnio}%
+                </p>
+              </div>
+            </div>
+
+            {/* Gráfico Barras Comparativo 12 Meses */}
+            <div className="h-64 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={resumenAnual.meses} margin={{ top: 10, right: 20, left: -10, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={darkMode ? '#334155' : '#E2E8F0'} />
+                  <XAxis dataKey="mesCorto" stroke={darkMode ? '#94A3B8' : '#64748B'} fontSize={11} />
+                  <YAxis stroke={darkMode ? '#94A3B8' : '#64748B'} fontSize={11} />
+                  <Tooltip
+                    formatter={(val) => String(formatoMoneda(val, moneda))}
+                    contentStyle={{
+                      backgroundColor: darkMode ? '#0F172A' : '#FFFFFF',
+                      borderColor: darkMode ? '#334155' : '#CBD5E1',
+                      borderRadius: '12px',
+                      color: darkMode ? '#F8FAFC' : '#0F172A',
+                      fontSize: '12px'
+                    }}
+                  />
+                  <Legend wrapperStyle={{ fontSize: '11px' }} />
+                  <Bar dataKey="Ingresos" fill="#10B981" radius={[6, 6, 0, 0]} />
+                  <Bar dataKey="Gastos" fill="#EF4444" radius={[6, 6, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+
+            {/* Tabla Detallada Mes a Mes */}
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs sm:text-sm">
+                <thead>
+                  <tr className={`border-b text-xs uppercase ${darkMode ? 'border-slate-800 text-slate-400' : 'border-slate-200 text-slate-500'}`}>
+                    <th className="py-3 px-3">Mes</th>
+                    <th className="py-3 px-3">Estado</th>
+                    <th className="py-3 px-3 text-right">Ingresos</th>
+                    <th className="py-3 px-3 text-right">Gastos Líquidos</th>
+                    <th className="py-3 px-3 text-right">Crédito</th>
+                    <th className="py-3 px-3 text-right">Total Gastos</th>
+                    <th className="py-3 px-3 text-right">Balance Neto</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {resumenAnual.meses.map((m) => (
+                    <tr
+                      key={m.mesIndex}
+                      onClick={() => { setMesSeleccionado(m.mesIndex); setSeccionActiva('general'); }}
+                      className={`cursor-pointer transition-colors ${darkMode ? 'border-slate-800 hover:bg-slate-800/60' : 'border-slate-100 hover:bg-slate-50'}`}
+                      title="Clic para abrir el detalle de este mes"
+                    >
+                      <td className="py-2.5 px-3 font-bold">{m.mes}</td>
+                      <td className="py-2.5 px-3">
+                        {m.cerrado ? (
+                          <span className="text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full font-bold">✓ Cerrado</span>
+                        ) : (
+                          <span className="text-[10px] bg-slate-700/60 text-slate-400 px-2 py-0.5 rounded-full">Abierto</span>
+                        )}
+                      </td>
+                      <td className="py-2.5 px-3 text-right text-emerald-500 font-semibold">{formatoMoneda(m.ingresos)}</td>
+                      <td className="py-2.5 px-3 text-right text-slate-400">{formatoMoneda(m.gastosLiquidos)}</td>
+                      <td className="py-2.5 px-3 text-right text-purple-400">{formatoMoneda(m.gastosCredito)}</td>
+                      <td className="py-2.5 px-3 text-right text-rose-500 font-semibold">{formatoMoneda(m.gastosTotales)}</td>
+                      <td className={`py-2.5 px-3 text-right font-bold ${m.balance >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {formatoMoneda(m.balance)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
+
         {/* PRESUPUESTOS POR CATEGORÍA Y PRESUPUESTO GLOBAL */}
         <section className={`p-6 rounded-2xl shadow-sm border ${darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100'}`}>
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
@@ -2553,16 +4904,18 @@ export default function App() {
                 const alertaCerca = porcentaje >= 80 && !sobrepasado;
 
                 return (
-                  <div key={cat} className={`p-4 rounded-xl border relative group ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                  <div key={cat} className={`p-4 rounded-xl border relative ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
                     <button
+                      type="button"
                       onClick={() => eliminarPresupuesto(cat)}
-                      className="absolute top-3 right-3 text-slate-400 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                      className="absolute top-2.5 right-2.5 p-2 rounded-lg text-slate-400 hover:text-rose-500 active:text-rose-500 hover:bg-rose-500/10 active:bg-rose-500/15 transition-colors touch-manipulation"
                       title="Eliminar presupuesto"
+                      aria-label="Eliminar presupuesto"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
 
-                    <div className="flex justify-between items-center mb-1">
+                    <div className="flex justify-between items-center mb-1 pr-8">
                       <span className={`font-bold text-sm ${darkMode ? 'text-slate-100' : 'text-slate-800'}`}>{cat}</span>
                       {sobrepasado ? (
                         <span className="text-[10px] bg-rose-500/20 text-rose-400 px-2 py-0.5 rounded-full font-bold">¡Excedido!</span>
@@ -2624,17 +4977,19 @@ export default function App() {
                 const yaRegistradoEsteMes = rec.ultimoMesRegistrado === claveMesAnio;
 
                 return (
-                  <div key={rec.id} className={`p-4 rounded-xl border relative group flex flex-col justify-between ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                  <div key={rec.id} className={`p-4 rounded-xl border relative flex flex-col justify-between ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
                     <button
+                      type="button"
                       onClick={() => eliminarRecurrente(rec.id)}
-                      className="absolute top-3 right-3 text-slate-400 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                      className="absolute top-2.5 right-2.5 p-2 rounded-lg text-slate-400 hover:text-rose-500 active:text-rose-500 hover:bg-rose-500/10 active:bg-rose-500/15 transition-colors touch-manipulation"
                       title="Eliminar recurrencia"
+                      aria-label="Eliminar recurrencia"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
 
                     <div>
-                      <div className="flex items-center gap-2 mb-1">
+                      <div className="flex items-center gap-2 mb-1 pr-8">
                         <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${rec.tipo === 'ingreso' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
                           {rec.tipo}
                         </span>
@@ -2734,73 +5089,345 @@ export default function App() {
             </div>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className={`border-b text-xs uppercase tracking-wider ${darkMode ? 'border-slate-800 text-slate-400' : 'border-slate-100 text-slate-500'}`}>
-                  <th className="py-3 px-4 font-semibold">Fecha</th>
-                  <th className="py-3 px-4 font-semibold">Concepto</th>
-                  <th className="py-3 px-4 font-semibold">Categoría</th>
-                  <th className="py-3 px-4 font-semibold">Cuenta / Método</th>
-                  <th className="py-3 px-4 font-semibold text-right">Monto</th>
-                  <th className="py-3 px-4 font-semibold text-center">Acción</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y text-sm">
-                {transaccionesFiltradas.length === 0 ? (
-                  <tr>
-                    <td colSpan="6" className="py-8 text-center text-slate-400">
-                      No hay transacciones registradas para este periodo y filtro.
-                    </td>
+          {transaccionesFiltradas.length === 0 ? (
+            <div className={`p-8 text-center border-2 border-dashed rounded-xl text-slate-400 text-sm ${darkMode ? 'border-slate-800' : 'border-slate-200'}`}>
+              No hay movimientos registrados con los filtros actuales en {NOMBRES_MESES[mesSeleccionado]} {anioSeleccionado}.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs sm:text-sm">
+                <thead>
+                  <tr className={`border-b text-xs uppercase ${darkMode ? 'border-slate-800 text-slate-400' : 'border-slate-100 text-slate-500'}`}>
+                    <th className="py-3 px-3">Fecha</th>
+                    <th className="py-3 px-3">Concepto</th>
+                    <th className="py-3 px-3">Categoría</th>
+                    <th className="py-3 px-3">Cuenta / Tarjeta</th>
+                    <th className="py-3 px-3 text-right">Monto</th>
+                    <th className="py-3 px-3 text-right">Acciones</th>
                   </tr>
-                ) : (
-                  transaccionesFiltradas.map((t) => (
-                    <tr key={t.id} className={`transition-colors ${darkMode ? 'border-slate-800 hover:bg-slate-800/50' : 'border-slate-50 hover:bg-slate-50'}`}>
-                      <td className="py-3 px-4 text-xs text-slate-400 whitespace-nowrap">{t.fecha}</td>
-                      <td className={`py-3 px-4 ${darkMode ? 'text-slate-200' : 'text-slate-800'}`}>
-                        <div className="font-medium">{t.descripcion}</div>
-                        {t.nota && (
-                          <div className="text-[11px] text-slate-400 font-normal italic mt-0.5">
-                            📝 {t.nota}
-                          </div>
-                        )}
-                      </td>
-                      <td className="py-3 px-4">
-                        <span className="text-xs px-2.5 py-1 rounded-full font-medium bg-indigo-500/10 text-indigo-500">
-                          {t.categoria}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 text-xs text-slate-400">{t.metodo}</td>
-                      <td className={`py-3 px-4 text-right font-bold whitespace-nowrap ${t.tipo === 'ingreso' ? 'text-emerald-500' : t.tipo === 'transferencia_salida' ? 'text-blue-400' : 'text-rose-500'}`}>
-                        {t.tipo === 'ingreso' ? '+' : t.tipo === 'transferencia_salida' ? '↔' : '-'} {formatoMoneda(t.monto, t.moneda || 'PEN')}
-                      </td>
-                      <td className="py-3 px-4 text-center whitespace-nowrap">
-                        {(t.tipo === 'ingreso' || t.tipo === 'gasto') && t.categoria !== 'Pago de Préstamo' && (
-                          <button
-                            onClick={() => abrirEdicionTransaccion(t)}
-                            className="p-1.5 text-slate-400 hover:text-indigo-500 transition-colors rounded-lg hover:bg-indigo-500/10"
-                            title="Editar transacción"
-                          >
-                            <Pencil className="w-4 h-4" />
-                          </button>
-                        )}
-                        <button
-                          onClick={() => eliminarTransaccion(t)}
-                          className="p-1.5 text-slate-400 hover:text-rose-500 transition-colors rounded-lg hover:bg-rose-500/10"
-                          title="Eliminar transacción"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </section>
+                </thead>
+                <tbody className="divide-y">
+                  {transaccionesFiltradas.map((t) => {
+                    const esEntrada = t.tipo === 'ingreso' || t.tipo === 'transferencia_entrada';
+                    const esTransferencia = t.tipo === 'transferencia_salida' || t.tipo === 'transferencia_entrada';
+                    const esEditable = t.tipo === 'ingreso' || t.tipo === 'gasto';
 
+                    return (
+                      <tr key={t.id} className={darkMode ? 'border-slate-800 hover:bg-slate-800/40' : 'border-slate-50 hover:bg-slate-50/70'}>
+                        <td className="py-3 px-3 text-xs text-slate-400 whitespace-nowrap">{t.fecha}</td>
+                        <td className="py-3 px-3">
+                          <div className="font-semibold flex items-center gap-1.5 flex-wrap">
+                            <span>{t.descripcion}</span>
+                            {t.esCredito && (
+                              <span className="text-[10px] bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded-full font-bold">
+                                Crédito
+                              </span>
+                            )}
+                            {esTransferencia && (
+                              <span className="text-[10px] bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded-full font-bold">
+                                Transferencia
+                              </span>
+                            )}
+                          </div>
+                          {t.nota && <p className="text-[11px] text-slate-400 mt-0.5">{t.nota}</p>}
+                        </td>
+                        <td className="py-3 px-3 text-xs text-slate-400">{t.categoria}</td>
+                        <td className="py-3 px-3 text-xs text-slate-400">{t.metodo}</td>
+                        <td className={`py-3 px-3 text-right font-bold whitespace-nowrap ${
+                          esTransferencia
+                            ? 'text-blue-400'
+                            : esEntrada
+                              ? 'text-emerald-500'
+                              : 'text-rose-500'
+                        }`}>
+                          {esEntrada ? '+' : '-'}{formatoMoneda(t.monto, t.moneda || 'PEN')}
+                        </td>
+                        <td className="py-3 px-3 text-right whitespace-nowrap">
+                          <div className="inline-flex items-center gap-1">
+                            {esEditable && (
+                              <button
+                                type="button"
+                                onClick={() => abrirEdicionTransaccion(t)}
+                                className="p-2 rounded-lg text-slate-400 hover:text-indigo-400 hover:bg-indigo-500/10 transition-colors"
+                                title="Editar movimiento"
+                                aria-label="Editar movimiento"
+                              >
+                                <Pencil className="w-4 h-4" />
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => eliminarTransaccion(t)}
+                              className="p-2 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-500/10 transition-colors"
+                              title="Eliminar movimiento"
+                              aria-label="Eliminar movimiento"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
       </div>
+
+      {/* MODAL NUEVA / EDITAR CUENTA O BILLETERA */}
+      {mostrarModalCuenta && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className={`rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4 ${darkMode ? 'bg-slate-900 border border-slate-800 text-white' : 'bg-white text-slate-800'}`}>
+            <h3 className="text-xl font-bold flex items-center gap-2">
+              <Building2 className="w-5 h-5 text-blue-500" />
+              {cuentaEditandoId ? 'Editar Cuenta / Billetera' : 'Nueva Cuenta o Billetera'}
+            </h3>
+            <form onSubmit={guardarCuenta} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold mb-1">Nombre de la Cuenta o Billetera</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ej: BCP Ahorros, Yape, Efectivo..."
+                  value={nombreCuentaForm}
+                  onChange={(e) => setNombreCuentaForm(e.target.value)}
+                  className={`w-full px-3 py-2 border rounded-xl text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200'}`}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold mb-1">Tipo</label>
+                  <select
+                    value={tipoCuentaForm}
+                    onChange={(e) => setTipoCuentaForm(e.target.value)}
+                    className={`w-full px-3 py-2 border rounded-xl text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200'}`}
+                  >
+                    <option value="Bancaria">Bancaria</option>
+                    <option value="Billetera Digital">Billetera Digital</option>
+                    <option value="Efectivo">Efectivo</option>
+                    <option value="Inversión / Ahorro">Inversión / Ahorro</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold mb-1">Moneda</label>
+                  <select
+                    value={monedaCuentaForm}
+                    onChange={(e) => setMonedaCuentaForm(e.target.value)}
+                    className={`w-full px-3 py-2 border rounded-xl text-sm font-bold ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200'}`}
+                  >
+                    <option value="PEN">PEN (S/)</option>
+                    <option value="USD">USD ($)</option>
+                    <option value="EUR">EUR (€)</option>
+                    <option value="CLP">CLP ($)</option>
+                  </select>
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <div className="col-span-2">
+                  <label className="block text-xs font-semibold mb-1">Saldo Inicial</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={saldoInicialCuentaForm}
+                    onChange={(e) => setSaldoInicialCuentaForm(e.target.value)}
+                    className={`w-full px-3 py-2 border rounded-xl text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200'}`}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold mb-1">Color</label>
+                  <input
+                    type="color"
+                    value={colorCuentaForm}
+                    onChange={(e) => setColorCuentaForm(e.target.value)}
+                    className="w-full h-9 px-1 py-1 border rounded-xl cursor-pointer bg-transparent"
+                  />
+                </div>
+              </div>
+              {cuentasBancarias.filter(c => c.id !== cuentaEditandoId).length > 0 && (
+                <div>
+                  <label className="block text-xs font-semibold mb-1">Vincular saldo a cuenta principal (Opcional, ej: Yape → BCP)</label>
+                  <select
+                    value={cuentaVinculadaIdForm}
+                    onChange={(e) => setCuentaVinculadaIdForm(e.target.value)}
+                    className={`w-full px-3 py-2 border rounded-xl text-xs ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200'}`}
+                  >
+                    <option value="">Cuenta independiente</option>
+                    {cuentasBancarias.filter(c => c.id !== cuentaEditandoId).map(c => (
+                      <option key={c.id} value={c.id}>{c.nombre} ({c.moneda})</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={() => setMostrarModalCuenta(false)} className="flex-1 py-2.5 border rounded-xl font-semibold text-sm">Cancelar</button>
+                <button type="submit" className="flex-1 py-2.5 bg-blue-600 text-white rounded-xl font-semibold text-sm">Guardar Cuenta</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL NUEVO PRÉSTAMO */}
+      {mostrarModalPrestamo && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className={`rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4 ${darkMode ? 'bg-slate-900 border border-slate-800 text-white' : 'bg-white text-slate-800'}`}>
+            <h3 className="text-xl font-bold flex items-center gap-2">
+              <HandCoins className="w-5 h-5 text-amber-500" />
+              Nuevo Préstamo o Cuenta por Cobrar
+            </h3>
+            <form onSubmit={guardarPrestamo} className="space-y-4">
+              <div className={`flex p-1 rounded-xl ${darkMode ? 'bg-slate-800' : 'bg-slate-100'}`}>
+                <button
+                  type="button"
+                  onClick={() => setTipoPrestamoForm('tomado')}
+                  className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all ${tipoPrestamoForm === 'tomado' ? (darkMode ? 'bg-slate-700 text-rose-400 shadow' : 'bg-white shadow text-rose-600') : 'text-slate-400'}`}
+                >
+                  Debo Pagar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTipoPrestamoForm('otorgado')}
+                  className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all ${tipoPrestamoForm === 'otorgado' ? (darkMode ? 'bg-slate-700 text-emerald-400 shadow' : 'bg-white shadow text-emerald-600') : 'text-slate-400'}`}
+                >
+                  Me Deben (Por Cobrar)
+                </button>
+              </div>
+              <input
+                type="text"
+                required
+                placeholder="Concepto del préstamo (Ej: Cena grupal, Préstamo coche...)"
+                value={nombrePrestamoForm}
+                onChange={(e) => setNombrePrestamoForm(e.target.value)}
+                className={`w-full px-3 py-2 border rounded-xl text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200'}`}
+              />
+              <div className="grid grid-cols-2 gap-2">
+                <input
+                  type="text"
+                  placeholder="Persona o Entidad"
+                  value={prestamistaForm}
+                  onChange={(e) => setPrestamistaForm(e.target.value)}
+                  className={`w-full px-3 py-2 border rounded-xl text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200'}`}
+                />
+                <input
+                  type="text"
+                  placeholder="Teléfono WhatsApp (Ej: 51999...)"
+                  value={telefonoContactoForm}
+                  onChange={(e) => setTelefonoContactoForm(e.target.value)}
+                  className={`w-full px-3 py-2 border rounded-xl text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200'}`}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <input
+                  type="number"
+                  step="0.01"
+                  required
+                  placeholder="Monto Total"
+                  value={montoTotalPrestamoForm}
+                  onChange={(e) => setMontoTotalPrestamoForm(e.target.value)}
+                  className={`w-full px-3 py-2 border rounded-xl text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200'}`}
+                />
+                <input
+                  type="number"
+                  step="0.01"
+                  placeholder="Pendiente (Opcional)"
+                  value={montoPendientePrestamoForm}
+                  onChange={(e) => setMontoPendientePrestamoForm(e.target.value)}
+                  className={`w-full px-3 py-2 border rounded-xl text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200'}`}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <select
+                  value={monedaPrestamoForm}
+                  onChange={(e) => setMonedaPrestamoForm(e.target.value)}
+                  className={`w-full px-3 py-2 border rounded-xl text-sm font-bold ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200'}`}
+                >
+                  <option value="PEN">PEN (S/)</option>
+                  <option value="USD">USD ($)</option>
+                  <option value="EUR">EUR (€)</option>
+                  <option value="CLP">CLP ($)</option>
+                </select>
+                <input
+                  type="number"
+                  min="1"
+                  max="31"
+                  placeholder="Día vencimiento (Opcional)"
+                  value={diaVencimientoPrestamoForm}
+                  onChange={(e) => setDiaVencimientoPrestamoForm(e.target.value)}
+                  className={`w-full px-3 py-2 border rounded-xl text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200'}`}
+                />
+              </div>
+              <label className="flex items-center gap-2 text-xs cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={esInformalForm}
+                  onChange={(e) => setEsInformalForm(e.target.checked)}
+                />
+                <span>Préstamo informal entre personas / amigos (Yape / Plin / Efectivo)</span>
+              </label>
+
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={() => setMostrarModalPrestamo(false)} className="flex-1 py-2.5 border rounded-xl font-semibold text-sm">Cancelar</button>
+                <button type="submit" className="flex-1 py-2.5 bg-amber-600 text-white rounded-xl font-semibold text-sm">Guardar Préstamo</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL ABONO PRÉSTAMO */}
+      {mostrarModalAbonoPrestamo && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className={`rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4 ${darkMode ? 'bg-slate-900 border border-slate-800 text-white' : 'bg-white text-slate-800'}`}>
+            <h3 className="text-xl font-bold flex items-center gap-2">
+              <HandCoins className="w-5 h-5 text-amber-500" />
+              Registrar Abono / Cuota de Préstamo
+            </h3>
+            <form onSubmit={registrarAbonoPrestamo} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold mb-1">Préstamo</label>
+                <select
+                  value={prestamoSeleccionadoId}
+                  onChange={(e) => setPrestamoSeleccionadoId(e.target.value)}
+                  className={`w-full px-3 py-2 border rounded-xl text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200'}`}
+                >
+                  {prestamos.map(p => (
+                    <option key={p.id} value={p.id}>{p.nombre} (Pend: {formatoMoneda(p.montoPendiente, p.moneda)})</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold mb-1">Cuenta Imputada</label>
+                <select
+                  value={cuentaOrigenAbonoPrestamoId}
+                  onChange={(e) => setCuentaOrigenAbonoPrestamoId(e.target.value)}
+                  className={`w-full px-3 py-2 border rounded-xl text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200'}`}
+                >
+                  {cuentasConSaldosActuales.map(c => (
+                    <option key={c.id} value={c.id}>{c.nombre} (Saldo: {formatoMoneda(c.saldoActual, c.moneda)})</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold mb-1">Monto del Abono</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  required
+                  value={montoAbonoPrestamo}
+                  onChange={(e) => setMontoAbonoPrestamo(e.target.value)}
+                  className={`w-full px-3 py-2 border rounded-xl text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200'}`}
+                />
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={() => setMostrarModalAbonoPrestamo(false)} className="flex-1 py-2.5 border rounded-xl font-semibold text-sm">Cancelar</button>
+                <button type="submit" className="flex-1 py-2.5 bg-amber-600 text-white rounded-xl font-semibold text-sm">Confirmar Abono</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* MODAL CONFIGURACIÓN CON GESTIÓN DE CATEGORÍAS */}
       {mostrarModalConfig && (
@@ -2855,7 +5482,7 @@ export default function App() {
 
                 <select
                   value={moneda}
-                  onChange={(e) => setMoneda(e.target.value)}
+                  onChange={(e) => handleCambiarMonedaPrincipal(e.target.value)}
                   className={`px-3 py-1.5 rounded-xl text-sm font-semibold border focus:outline-none focus:ring-2 focus:ring-indigo-500 ${darkMode ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
                 >
                   <option value="CLP" className="bg-slate-800 text-white">CLP ($ Pesos Chilenos)</option>
@@ -2863,6 +5490,91 @@ export default function App() {
                   <option value="USD" className="bg-slate-800 text-white">USD ($ Dólares)</option>
                   <option value="EUR" className="bg-slate-800 text-white">EUR (€ Euros)</option>
                 </select>
+              </div>
+
+              {/* SECCIÓN TIPOS DE CAMBIO / TASAS DE CONVERSIÓN */}
+              <div className={`p-4 rounded-xl border space-y-3 ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                <div className="flex items-center justify-between">
+                  <h4 className="font-bold text-sm flex items-center gap-2">
+                    <ArrowRightLeft className="w-4 h-4 text-indigo-400" />
+                    Tipos de Cambio / Tasas de Conversión
+                  </h4>
+                  <button
+                    type="button"
+                    onClick={() => setTiposCambio({ USD_PEN: 3.75, EUR_PEN: 4.10, CLP_PEN: 0.0041, USD_CLP: 920, EUR_CLP: 1000 })}
+                    className="text-[11px] font-semibold text-indigo-400 hover:text-indigo-300 underline"
+                  >
+                    Restablecer por defecto
+                  </button>
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  Define el valor equivalente en Soles Peruanos (PEN) para cada moneda extranjera.
+                </p>
+
+                <div className="space-y-2.5">
+                  {/* CLP a PEN */}
+                  <div className={`p-2.5 rounded-lg border flex flex-col sm:flex-row sm:items-center justify-between gap-2 ${darkMode ? 'bg-slate-900/60 border-slate-700' : 'bg-white border-slate-200'}`}>
+                    <div>
+                      <span className="text-xs font-bold block">1 CLP → PEN (S/)</span>
+                      <span className="text-[10px] text-slate-400">
+                        Inversa: 1 PEN ≈ {tiposCambio.CLP_PEN > 0 ? Math.round((1 / tiposCambio.CLP_PEN) * 100) / 100 : 0} CLP
+                      </span>
+                    </div>
+                    <input
+                      type="number"
+                      step="0.0001"
+                      min="0.00001"
+                      value={tiposCambio.CLP_PEN ?? ''}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value);
+                        setTiposCambio(prev => ({ ...prev, CLP_PEN: isNaN(val) ? 0 : val }));
+                      }}
+                      className={`w-full sm:w-28 px-2.5 py-1.5 rounded-lg border text-xs font-mono font-bold text-right ${darkMode ? 'bg-slate-800 border-slate-600 text-white' : 'bg-slate-50 border-slate-300 text-slate-800'}`}
+                    />
+                  </div>
+
+                  {/* USD a PEN */}
+                  <div className={`p-2.5 rounded-lg border flex flex-col sm:flex-row sm:items-center justify-between gap-2 ${darkMode ? 'bg-slate-900/60 border-slate-700' : 'bg-white border-slate-200'}`}>
+                    <div>
+                      <span className="text-xs font-bold block">1 USD → PEN (S/)</span>
+                      <span className="text-[10px] text-slate-400">
+                        Inversa: 1 PEN ≈ {tiposCambio.USD_PEN > 0 ? (1 / tiposCambio.USD_PEN).toFixed(4) : 0} USD
+                      </span>
+                    </div>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      value={tiposCambio.USD_PEN ?? ''}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value);
+                        setTiposCambio(prev => ({ ...prev, USD_PEN: isNaN(val) ? 0 : val }));
+                      }}
+                      className={`w-full sm:w-28 px-2.5 py-1.5 rounded-lg border text-xs font-mono font-bold text-right ${darkMode ? 'bg-slate-800 border-slate-600 text-white' : 'bg-slate-50 border-slate-300 text-slate-800'}`}
+                    />
+                  </div>
+
+                  {/* EUR a PEN */}
+                  <div className={`p-2.5 rounded-lg border flex flex-col sm:flex-row sm:items-center justify-between gap-2 ${darkMode ? 'bg-slate-900/60 border-slate-700' : 'bg-white border-slate-200'}`}>
+                    <div>
+                      <span className="text-xs font-bold block">1 EUR → PEN (S/)</span>
+                      <span className="text-[10px] text-slate-400">
+                        Inversa: 1 PEN ≈ {tiposCambio.EUR_PEN > 0 ? (1 / tiposCambio.EUR_PEN).toFixed(4) : 0} EUR
+                      </span>
+                    </div>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      value={tiposCambio.EUR_PEN ?? ''}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value);
+                        setTiposCambio(prev => ({ ...prev, EUR_PEN: isNaN(val) ? 0 : val }));
+                      }}
+                      className={`w-full sm:w-28 px-2.5 py-1.5 rounded-lg border text-xs font-mono font-bold text-right ${darkMode ? 'bg-slate-800 border-slate-600 text-white' : 'bg-slate-50 border-slate-300 text-slate-800'}`}
+                    />
+                  </div>
+                </div>
               </div>
 
               {/* SECCIÓN CATEGORÍAS PERSONALIZADAS */}
@@ -3050,6 +5762,7 @@ export default function App() {
                     <option value="PEN" className="bg-slate-800 text-white">PEN (S/)</option>
                     <option value="USD" className="bg-slate-800 text-white">USD ($)</option>
                     <option value="EUR" className="bg-slate-800 text-white">EUR (€)</option>
+                    <option value="CLP" className="bg-slate-800 text-white">CLP ($)</option>
                   </select>
                 </div>
               </div>
@@ -3389,6 +6102,32 @@ export default function App() {
                 />
               </div>
 
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Categoría de Gasto</label>
+                  <select
+                    value={categoriaCuotaForm}
+                    onChange={(e) => setCategoriaCuotaForm(e.target.value)}
+                    className={`w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
+                  >
+                    {catGastosPers.map(cat => (
+                      <option key={cat} value={cat} className="bg-slate-800 text-white">{cat}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Fecha de Inicio / 1ra Cuota</label>
+                  <input
+                    type="date"
+                    required
+                    value={fechaCuotaForm}
+                    onChange={(e) => setFechaCuotaForm(e.target.value)}
+                    className={`w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
+                  />
+                </div>
+              </div>
+
               <div>
                 <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Monto Total de la Compra</label>
                 <input
@@ -3503,6 +6242,7 @@ export default function App() {
                     <option value="PEN">PEN (S/)</option>
                     <option value="USD">USD ($)</option>
                     <option value="EUR">EUR (€)</option>
+                    <option value="CLP">CLP ($)</option>
                   </select>
                 </div>
               </div>
@@ -3631,6 +6371,7 @@ export default function App() {
                     <option value="PEN">PEN</option>
                     <option value="USD">USD</option>
                     <option value="EUR">EUR</option>
+                    <option value="CLP">CLP</option>
                   </select>
                 </div>
               </div>
@@ -3751,218 +6492,446 @@ export default function App() {
                 onClick={ejecutarCierreMes}
                 className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-semibold text-xs shadow-sm"
               >
-                Confirmar Corte de Caja
+                Confirmar Cierre
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* MODAL INFORMACIÓN Y HISTORIAL DE CIERRES */}
+      {/* MODAL BITÁCORA DE CIERRES HISTÓRICOS */}
       {mostrarModalInfoData && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className={`rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6 space-y-5 ${darkMode ? 'bg-slate-900 border border-slate-800 text-white' : 'bg-white text-slate-800'}`}>
-            <div className={`flex items-center justify-between border-b pb-3 ${darkMode ? 'border-slate-800' : 'border-slate-100'}`}>
-              <h3 className={`text-xl font-bold flex items-center gap-2 ${darkMode ? 'text-white' : 'text-slate-800'}`}>
-                <Database className="w-6 h-6 text-indigo-600" />
-                Almacenamiento y Histórico de Cierres
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className={`rounded-2xl shadow-xl w-full max-w-lg p-6 space-y-4 ${darkMode ? 'bg-slate-900 border border-slate-800 text-white' : 'bg-white text-slate-800'}`}>
+            <div className="flex justify-between items-center border-b pb-3 border-slate-700/50">
+              <h3 className="text-lg font-bold flex items-center gap-2">
+                <Archive className="w-5 h-5 text-emerald-500" /> Bitácora de Cierres de Mes ({cierresHistoricos.length})
               </h3>
-              <button
-                onClick={() => setMostrarModalInfoData(false)}
-                className="text-slate-400 hover:text-slate-600 font-bold text-lg"
-              >
-                ✕
-              </button>
+              <button type="button" onClick={() => setMostrarModalInfoData(false)} className="text-slate-400 hover:text-slate-200 font-bold">✕</button>
             </div>
-
-            {mensajeRespaldo && (
-              <div className={`p-3 rounded-xl text-xs font-semibold ${mensajeRespaldo.tipo === 'ok' ? 'bg-emerald-50 text-emerald-600 border border-emerald-200' : 'bg-rose-50 text-rose-600 border border-rose-200'}`}>
-                {mensajeRespaldo.texto}
+            {cierresHistoricos.length === 0 ? (
+              <p className="text-xs text-slate-400">No hay cierres archivados aún.</p>
+            ) : (
+              <div className="space-y-2 max-h-80 overflow-y-auto">
+                {cierresHistoricos.map((c) => (
+                  <div key={c.id} className={`p-3 rounded-xl border text-xs flex justify-between items-center ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                    <div>
+                      <p className="font-bold">{c.periodo}</p>
+                      <p className="text-slate-400 text-[11px]">Cerrado el {c.fechaCierre}</p>
+                    </div>
+                    <div className="text-right">
+                      <span className={`font-bold block ${c.balanceNeto >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        Balance: {formatoMoneda(c.balanceNeto, c.moneda)}
+                      </span>
+                      <span className="text-[10px] text-slate-400">Liquidez: {formatoMoneda(c.saldoLiquidoFinal, c.moneda)}</span>
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
-
-            <div className="space-y-4 text-sm text-slate-400">
-              <div className={`p-3 border rounded-xl flex items-start gap-3 ${darkMode ? 'bg-indigo-950/40 border-indigo-900/50 text-indigo-200' : 'bg-indigo-50 border-indigo-100 text-indigo-950'}`}>
-                <Cloud className="w-6 h-6 text-indigo-500 shrink-0 mt-0.5" />
-                <div>
-                  <h4 className="font-bold">Respaldo y Auditoría</h4>
-                  <p className="text-xs mt-0.5 opacity-90">
-                    Descarga tus movimientos o restaura datos desde cualquier dispositivo.
-                  </p>
-                </div>
-              </div>
-
-              {cierresHistoricos.length > 0 && (
-                <div className={`p-3 border rounded-xl space-y-2 ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
-                  <h4 className={`font-bold text-xs uppercase tracking-wider ${darkMode ? 'text-slate-200' : 'text-slate-700'}`}>Bitácora de Cortes de Caja Archivados</h4>
-                  <div className="space-y-1.5 max-h-32 overflow-y-auto pr-1">
-                    {cierresHistoricos.map(c => (
-                      <div key={c.id} className="text-xs p-2 rounded bg-slate-900/50 flex justify-between items-center">
-                        <div>
-                          <strong>{c.periodo}</strong> <span className="text-[10px] text-slate-500">({c.fechaCierre})</span>
-                        </div>
-                        <span className={`font-bold ${c.balanceNeto >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                          {formatoMoneda(c.balanceNeto, c.moneda)}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div className={`p-3 border rounded-xl space-y-3 ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={exportarRespaldo}
-                    className="flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white"
-                  >
-                    <Download className="w-4 h-4" /> Descargar respaldo
-                  </button>
-                  <label
-                    className={`flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-semibold cursor-pointer border transition-colors ${darkMode ? 'border-slate-600 text-slate-200 hover:bg-slate-700' : 'border-slate-300 text-slate-700 hover:bg-slate-100'}`}
-                  >
-                    <Upload className="w-4 h-4" /> Restaurar respaldo
-                    <input type="file" accept=".json,application/json" onChange={importarRespaldo} className="hidden" />
-                  </label>
-                </div>
-                <button
-                  type="button"
-                  onClick={exportarCSV}
-                  className={`w-full flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-semibold border transition-colors ${darkMode ? 'border-slate-600 text-slate-200 hover:bg-slate-700' : 'border-slate-300 text-slate-700 hover:bg-slate-100'}`}
-                >
-                  <Download className="w-4 h-4" /> Exportar movimientos a CSV (Excel)
-                </button>
-              </div>
-            </div>
-
-            <button
-              onClick={() => setMostrarModalInfoData(false)}
-              className={`w-full py-2.5 font-semibold rounded-xl text-sm transition-colors ${darkMode ? 'bg-slate-800 hover:bg-slate-700 text-white border border-slate-700' : 'bg-slate-900 text-white hover:bg-slate-800'}`}
-            >
-              Cerrar
-            </button>
           </div>
         </div>
       )}
 
-      {/* MODAL NUEVA/EDITAR CUENTA */}
-      {mostrarModalCuenta && (
+      {/* MODAL NUEVA META DE AHORRO */}
+      {mostrarModalMeta && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className={`rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4 ${darkMode ? 'bg-slate-900 border border-slate-800 text-white' : 'bg-white text-slate-800'}`}>
-            <h3 className={`text-xl font-bold flex items-center gap-2 ${darkMode ? 'text-white' : 'text-slate-800'}`}>
-              <Building2 className="w-5 h-5 text-blue-500" />
-              {cuentaEditandoId ? 'Editar Cuenta o Billetera' : 'Nueva Cuenta / Billetera Digital'}
+            <h3 className="text-xl font-bold flex items-center gap-2">
+              <PiggyBank className="w-5 h-5 text-emerald-500" />
+              Nueva Meta de Ahorro
             </h3>
-            
-            <form onSubmit={guardarCuenta} className="space-y-4">
+            <form onSubmit={guardarMeta} className="space-y-4">
               <div>
-                <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Nombre de la Cuenta / Billetera</label>
+                <label className="block text-xs font-semibold mb-1">Nombre del Objetivo</label>
                 <input
                   type="text"
                   required
-                  placeholder="Ej: BCP Débito, Yape, BBVA..."
-                  value={nombreCuentaForm}
-                  onChange={(e) => setNombreCuentaForm(e.target.value)}
-                  className={`w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500' : 'bg-white border-slate-200 text-slate-800'}`}
+                  placeholder="Ej: Fondo de Emergencia, Viaje, Laptop..."
+                  value={nombreMetaForm}
+                  onChange={(e) => setNombreMetaForm(e.target.value)}
+                  className={`w-full px-3 py-2 border rounded-xl text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200'}`}
                 />
               </div>
-
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Tipo</label>
-                  <select
-                    value={tipoCuentaForm}
-                    onChange={(e) => setTipoCuentaForm(e.target.value)}
-                    className={`w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
-                  >
-                    <option value="Bancaria">Bancaria</option>
-                    <option value="Billetera Digital">Billetera Digital</option>
-                    <option value="Efectivo">Efectivo</option>
-                    <option value="Ahorros">Ahorros</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Moneda</label>
-                  <select
-                    value={monedaCuentaForm}
-                    onChange={(e) => setMonedaCuentaForm(e.target.value)}
-                    className={`w-full px-2 py-2 border rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm font-bold ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
-                  >
-                    <option value="PEN">PEN (S/)</option>
-                    <option value="USD">USD ($)</option>
-                    <option value="EUR">EUR (€)</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Saldo Inicial</label>
+                  <label className="block text-xs font-semibold mb-1">Monto Objetivo</label>
                   <input
                     type="number"
                     step="0.01"
                     required
-                    placeholder="0.00"
-                    value={saldoInicialCuentaForm}
-                    onChange={(e) => setSaldoInicialCuentaForm(e.target.value)}
-                    className={`w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white placeholder-slate-500' : 'bg-white border-slate-200 text-slate-800'}`}
+                    placeholder="5000.00"
+                    value={montoObjetivoMetaForm}
+                    onChange={(e) => setMontoObjetivoMetaForm(e.target.value)}
+                    className={`w-full px-3 py-2 border rounded-xl text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200'}`}
                   />
                 </div>
-
                 <div>
-                  <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Color Indicador</label>
+                  <label className="block text-xs font-semibold mb-1">Ahorro Inicial (Opcional)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    placeholder="0.00"
+                    value={montoInicialMetaForm}
+                    onChange={(e) => setMontoInicialMetaForm(e.target.value)}
+                    className={`w-full px-3 py-2 border rounded-xl text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200'}`}
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="block text-xs font-semibold mb-1">Moneda</label>
+                  <select
+                    value={monedaMetaForm}
+                    onChange={(e) => setMonedaMetaForm(e.target.value)}
+                    className={`w-full px-2 py-2 border rounded-xl text-sm font-bold ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200'}`}
+                  >
+                    <option value="PEN">PEN (S/)</option>
+                    <option value="USD">USD ($)</option>
+                    <option value="EUR">EUR (€)</option>
+                    <option value="CLP">CLP ($)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold mb-1">Fecha Límite</label>
+                  <input
+                    type="date"
+                    value={fechaLimiteMetaForm}
+                    onChange={(e) => setFechaLimiteMetaForm(e.target.value)}
+                    className={`w-full px-2 py-2 border rounded-xl text-xs ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200'}`}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold mb-1">Color</label>
                   <input
                     type="color"
-                    value={colorCuentaForm}
-                    onChange={(e) => setColorCuentaForm(e.target.value)}
-                    className="w-full h-10 px-1 py-1 border rounded-xl cursor-pointer bg-transparent"
+                    value={colorMetaForm}
+                    onChange={(e) => setColorMetaForm(e.target.value)}
+                    className="w-full h-9 px-1 py-1 border rounded-xl cursor-pointer bg-transparent"
                   />
                 </div>
               </div>
-
-              <div>
-                <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Vincular con otra Cuenta (Bolsa de fondos compartida)</label>
-                <select
-                  value={cuentaVinculadaIdForm}
-                  onChange={(e) => setCuentaVinculadaIdForm(e.target.value)}
-                  className={`w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
-                >
-                  <option value="">-- Sin vinculación (Independiente) --</option>
-                  {cuentasBancarias
-                    .filter(c => c.id !== cuentaEditandoId)
-                    .map(c => (
-                      <option key={c.id} value={c.id}>
-                        Vincular a: {c.nombre} ({c.tipo})
-                      </option>
-                    ))}
-                </select>
-                <p className="text-[10px] text-slate-400 mt-1">
-                  💡 Al vincular por ejemplo Yape a BCP, ambos compartirán exactamente el mismo saldo y bolsa de fondos.
-                </p>
-              </div>
-
               <div className="flex gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setMostrarModalCuenta(false)}
-                  className={`flex-1 py-2.5 border rounded-xl font-semibold text-sm transition-colors ${darkMode ? 'border-slate-700 text-slate-300 hover:bg-slate-800' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 py-2.5 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 text-sm shadow-sm"
-                >
-                  Guardar Cuenta
-                </button>
+                <button type="button" onClick={() => setMostrarModalMeta(false)} className="flex-1 py-2.5 border rounded-xl font-semibold text-sm">Cancelar</button>
+                <button type="submit" className="flex-1 py-2.5 bg-emerald-600 text-white rounded-xl font-semibold text-sm">Crear Meta</button>
               </div>
             </form>
           </div>
         </div>
       )}
 
+      {/* MODAL APORTE A META DE AHORRO */}
+      {mostrarModalAporteMeta && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className={`rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4 ${darkMode ? 'bg-slate-900 border border-slate-800 text-white' : 'bg-white text-slate-800'}`}>
+            <h3 className="text-xl font-bold flex items-center gap-2">
+              <PiggyBank className="w-5 h-5 text-emerald-500" />
+              Registrar Aporte a Meta
+            </h3>
+            <form onSubmit={registrarAporteMeta} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold mb-1">Meta Destino</label>
+                <select
+                  value={metaSeleccionadaId}
+                  onChange={(e) => setMetaSeleccionadaId(e.target.value)}
+                  className={`w-full px-3 py-2 border rounded-xl text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200'}`}
+                >
+                  {metas.map(m => (
+                    <option key={m.id} value={m.id}>
+                      {m.nombre} ({formatoMoneda(m.montoActual, m.moneda)} / {formatoMoneda(m.montoObjetivo, m.moneda)})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {cuentasBancarias.length > 0 && (
+                <label className="flex items-center gap-2 text-xs cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={descontarCuentaMeta}
+                    onChange={(e) => setDescontarCuentaMeta(e.target.checked)}
+                  />
+                  <span>Descontar aporte desde una cuenta o billetera</span>
+                </label>
+              )}
+
+              {descontarCuentaMeta && cuentasBancarias.length > 0 && (
+                <div>
+                  <label className="block text-xs font-semibold mb-1">Cuenta Origen</label>
+                  <select
+                    value={cuentaAporteMetaId}
+                    onChange={(e) => setCuentaAporteMetaId(e.target.value)}
+                    className={`w-full px-3 py-2 border rounded-xl text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200'}`}
+                  >
+                    {cuentasConSaldosActuales.map(c => (
+                      <option key={c.id} value={c.id}>
+                        {c.nombre} (Saldo: {formatoMoneda(c.saldoActual, c.moneda)})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-semibold mb-1">Monto del Aporte</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  required
+                  placeholder="0.00"
+                  value={montoAporteMetaForm}
+                  onChange={(e) => setMontoAporteMetaForm(e.target.value)}
+                  className={`w-full px-3 py-2 border rounded-xl text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200'}`}
+                />
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={() => setMostrarModalAporteMeta(false)} className="flex-1 py-2.5 border rounded-xl font-semibold text-sm">Cancelar</button>
+                <button type="submit" className="flex-1 py-2.5 bg-emerald-600 text-white rounded-xl font-semibold text-sm">Confirmar Aporte</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL CONFIGURACIÓN Y GENERACIÓN DE REPORTE PDF */}
+      {mostrarModalPdf && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className={`rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6 space-y-5 ${darkMode ? 'bg-slate-900 border border-slate-800 text-white' : 'bg-white text-slate-800'}`}>
+            <div className="flex items-center justify-between border-b pb-3 border-slate-700/50">
+              <h3 className="text-lg font-bold flex items-center gap-2">
+                <FileText className="w-5 h-5 text-indigo-500" />
+                Generar Reporte Financiero en PDF
+              </h3>
+              <button
+                type="button"
+                onClick={() => setMostrarModalPdf(false)}
+                className="text-slate-400 hover:text-slate-200 font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              {/* Selección de período */}
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">
+                  1. Período del Reporte (Moneda: {moneda})
+                </label>
+                <div className={`grid grid-cols-3 gap-1.5 p-1 rounded-xl ${darkMode ? 'bg-slate-800' : 'bg-slate-100'}`}>
+                  <button
+                    type="button"
+                    onClick={() => setPdfTipoPeriodo('mes')}
+                    className={`py-2 px-2 rounded-lg text-xs font-bold transition-all ${
+                      pdfTipoPeriodo === 'mes'
+                        ? (darkMode ? 'bg-slate-700 text-indigo-400 shadow' : 'bg-white text-indigo-600 shadow')
+                        : 'text-slate-400'
+                    }`}
+                  >
+                    Mes ({NOMBRES_MESES[mesSeleccionado].slice(0, 3)} {anioSeleccionado})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPdfTipoPeriodo('anio')}
+                    className={`py-2 px-2 rounded-lg text-xs font-bold transition-all ${
+                      pdfTipoPeriodo === 'anio'
+                        ? (darkMode ? 'bg-slate-700 text-indigo-400 shadow' : 'bg-white text-indigo-600 shadow')
+                        : 'text-slate-400'
+                    }`}
+                  >
+                    Año ({anioSeleccionado})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPdfTipoPeriodo('rango')}
+                    className={`py-2 px-2 rounded-lg text-xs font-bold transition-all ${
+                      pdfTipoPeriodo === 'rango'
+                        ? (darkMode ? 'bg-slate-700 text-indigo-400 shadow' : 'bg-white text-indigo-600 shadow')
+                        : 'text-slate-400'
+                    }`}
+                  >
+                    Rango Fechas
+                  </button>
+                </div>
+
+                {pdfTipoPeriodo === 'rango' && (
+                  <div className="grid grid-cols-2 gap-3 mt-3">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-400 mb-1">Desde</label>
+                      <input
+                        type="date"
+                        value={pdfFechaInicio}
+                        onChange={(e) => setPdfFechaInicio(e.target.value)}
+                        className={`w-full px-3 py-2 border rounded-xl text-xs ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200'}`}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-400 mb-1">Hasta</label>
+                      <input
+                        type="date"
+                        value={pdfFechaFin}
+                        onChange={(e) => setPdfFechaFin(e.target.value)}
+                        className={`w-full px-3 py-2 border rounded-xl text-xs ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200'}`}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Apartados fijos incluidos */}
+              <div className={`p-3.5 rounded-xl border text-xs space-y-1.5 ${darkMode ? 'bg-slate-800/60 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                <div className="font-bold text-indigo-400">Apartados principales incluidos automáticamente:</div>
+                <ul className="space-y-1 text-slate-400 list-disc list-inside">
+                  <li>Encabezado con período, moneda ({moneda}) y fecha de generación</li>
+                  <li>Resumen del período (ingresos, gastos, balance y % ahorrado)</li>
+                  <li>Tabla de gastos por categoría, % del total y límite de presupuesto</li>
+                  <li>Detalle completo de movimientos ordenados por fecha con totales</li>
+                </ul>
+              </div>
+
+              {/* Opciones adicionales */}
+              <div className="space-y-2.5">
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-400">
+                  2. Apartados Opcionales
+                </label>
+
+                {pdfTipoPeriodo === 'mes' && (
+                  <label className={`flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer text-xs ${darkMode ? 'bg-slate-800/50 border-slate-700' : 'bg-white border-slate-200'}`}>
+                    <input
+                      type="checkbox"
+                      checked={pdfCompararAnterior}
+                      onChange={(e) => setPdfCompararAnterior(e.target.checked)}
+                      className="mt-0.5"
+                    />
+                    <div>
+                      <span className="font-bold block">Comparativa con el mes anterior</span>
+                      <span className="text-[11px] text-slate-400">Muestra variación de ingresos, gastos y balance respecto al mes previo.</span>
+                    </div>
+                  </label>
+                )}
+
+                <label className={`flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer text-xs ${darkMode ? 'bg-slate-800/50 border-slate-700' : 'bg-white border-slate-200'}`}>
+                  <input
+                    type="checkbox"
+                    checked={pdfIncluirCuentasDeudas}
+                    onChange={(e) => setPdfIncluirCuentasDeudas(e.target.checked)}
+                    className="mt-0.5"
+                  />
+                  <div>
+                    <span className="font-bold block">Saldos por cuenta, deudas y vencimientos</span>
+                    <span className="text-[11px] text-slate-400">Detalle de saldo en cada cuenta/billetera, deuda de tarjetas, préstamos y próximos vencimientos.</span>
+                  </div>
+                </label>
+
+                <label className={`flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer text-xs ${darkMode ? 'bg-slate-800/50 border-slate-700' : 'bg-white border-slate-200'}`}>
+                  <input
+                    type="checkbox"
+                    checked={pdfIncluirResumenAnual}
+                    onChange={(e) => setPdfIncluirResumenAnual(e.target.checked)}
+                    className="mt-0.5"
+                  />
+                  <div>
+                    <span className="font-bold block">Resumen anual ({anioSeleccionado})</span>
+                    <span className="text-[11px] text-slate-400">Tabla comparativa de ingresos y gastos mes a mes de todo el año.</span>
+                  </div>
+                </label>
+
+                <label className={`flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer text-xs ${darkMode ? 'bg-slate-800/50 border-slate-700' : 'bg-white border-slate-200'}`}>
+                  <input
+                    type="checkbox"
+                    checked={pdfIncluirMetas}
+                    onChange={(e) => setPdfIncluirMetas(e.target.checked)}
+                    className="mt-0.5"
+                  />
+                  <div>
+                    <span className="font-bold block">Metas de ahorro ({metas.length})</span>
+                    <span className="text-[11px] text-slate-400">Monto ahorrado, objetivo, faltante y porcentaje de avance de cada meta.</span>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setMostrarModalPdf(false)}
+                className={`flex-1 py-2.5 border rounded-xl font-semibold text-xs transition-colors ${darkMode ? 'border-slate-700 text-slate-300 hover:bg-slate-800' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={generarReportePDF}
+                className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-xs shadow-md flex items-center justify-center gap-1.5 transition-colors"
+              >
+                <Printer className="w-4 h-4" /> Generar y Guardar PDF
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* DIÁLOGO PROPIO DE CONFIRMACIÓN */}
+      {dialogoConfirmacion && (
+        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className={`rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4 border ${darkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-800'}`}>
+            <div className="flex items-start gap-3">
+              <div className={`p-2.5 rounded-xl shrink-0 ${dialogoConfirmacion.variante === 'danger' ? 'bg-rose-500/20 text-rose-400' : 'bg-indigo-500/20 text-indigo-400'}`}>
+                <AlertCircle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold">{dialogoConfirmacion.titulo}</h3>
+                <p className={`text-xs mt-1 leading-relaxed ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>
+                  {dialogoConfirmacion.mensaje}
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setDialogoConfirmacion(null)}
+                className={`flex-1 py-2.5 rounded-xl text-xs font-bold border transition-colors ${darkMode ? 'border-slate-700 text-slate-300 hover:bg-slate-800' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const fn = dialogoConfirmacion.onConfirm;
+                  setDialogoConfirmacion(null);
+                  if (typeof fn === 'function') fn();
+                }}
+                className={`flex-1 py-2.5 rounded-xl text-xs font-bold text-white transition-colors ${dialogoConfirmacion.variante === 'danger' ? 'bg-rose-600 hover:bg-rose-700' : 'bg-indigo-600 hover:bg-indigo-700'}`}
+              >
+                {dialogoConfirmacion.textoConfirmar}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* NOTIFICACIÓN FLOTANTE PROPIA */}
+      {notificacionToast && (
+        <div className="fixed bottom-5 right-5 z-50 max-w-sm">
+          <div className={`px-4 py-3 rounded-2xl shadow-xl border text-xs font-semibold flex items-center gap-2.5 ${
+            notificacionToast.tipo === 'error'
+              ? 'bg-rose-950/95 border-rose-500/40 text-rose-200'
+              : 'bg-slate-900/95 border-emerald-500/40 text-emerald-200'
+          }`}>
+            <CheckCircle2 className={`w-4 h-4 shrink-0 ${notificacionToast.tipo === 'error' ? 'text-rose-400' : 'text-emerald-400'}`} />
+            <span>{notificacionToast.texto}</span>
+          </div>
+        </div>
+      )}
+
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <AppErrorBoundary>
+      <FinanzasDashboard />
+    </AppErrorBoundary>
   );
 }
