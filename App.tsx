@@ -1097,81 +1097,140 @@ function FinanzasDashboard() {
       });
     }
 
+    // Saldo inicial total de cuentas líquidas independientes
+    const idsProcesados = new Set();
+    let saldoInicialTotal = 0;
+    cuentasBancarias.forEach(cta => {
+      const idContab = cta.cuentaVinculadaId || cta.id;
+      if (!idsProcesados.has(idContab)) {
+        idsProcesados.add(idContab);
+        saldoInicialTotal += convertirMoneda(cta.saldoInicial || 0, cta.moneda || 'PEN', moneda);
+      }
+    });
+
+    // Deuda actual total de tarjetas y préstamos tomados (para reconstruir hacia atrás por fecha)
+    const deudaActualTarjetas = tarjetas.reduce(
+      (acc, t) => acc + convertirMoneda(t.deudaActual || 0, t.moneda || 'PEN', moneda),
+      0
+    );
+    const deudaActualPrestamos = prestamos.reduce(
+      (acc, p) => p.tipo === 'tomado' ? acc + convertirMoneda(p.montoPendiente || 0, p.moneda || 'PEN', moneda) : acc,
+      0
+    );
+
     return meses.map(mInfo => {
-      let liquidoAcumulado = 0;
-
-      let deudasTarjetasAcumuladas = tarjetas.reduce((acc, t) => {
-        return acc + convertirMoneda(t.deudaActual || 0, t.moneda || 'PEN', moneda);
-      }, 0);
-
-      let deudasPrestamosAcumuladas = prestamos.reduce((acc, p) => {
-        if (p.tipo === 'tomado') {
-          return acc + convertirMoneda(p.montoPendiente || 0, p.moneda || 'PEN', moneda);
-        }
-        return acc;
-      }, 0);
+      let liquidoAcumulado = saldoInicialTotal;
+      let deltaDeudaPosteriorAlMes = 0;
 
       transacciones.forEach(t => {
         const [yStr, mStr] = (t.fecha || '').split('-');
         const transY = parseInt(yStr, 10);
         const transM = parseInt(mStr, 10) - 1;
+        if (isNaN(transY) || isNaN(transM)) return;
 
-        if (transY < mInfo.anio || (transY === mInfo.anio && transM <= mInfo.mes)) {
-          const montoConv = convertirMoneda(t.monto, t.moneda || 'PEN', moneda);
+        const montoConv = convertirMoneda(t.monto, t.moneda || 'PEN', moneda);
+        const esHastaEsteMes = transY < mInfo.anio || (transY === mInfo.anio && transM <= mInfo.mes);
 
+        if (esHastaEsteMes) {
           if (t.tipo === 'ingreso') {
             liquidoAcumulado += montoConv;
           } else if (t.tipo === 'gasto' && !t.esCredito) {
             liquidoAcumulado -= montoConv;
-          } else if (t.tipo === 'pago_tarjeta' || t.tipo === 'pago_prestamo') {
+          } else if (t.tipo === 'pago_tarjeta' || t.tipo === 'pago_prestamo' || t.tipo === 'aporte_meta') {
             liquidoAcumulado -= montoConv;
+          }
+        } else {
+          // Movimientos posteriores a mInfo que modificaron la deuda actual:
+          // los revertimos para obtener la deuda exacta que existía al cierre de mInfo
+          if (t.tipo === 'gasto' && t.esCredito) {
+            deltaDeudaPosteriorAlMes += montoConv;
+          } else if (t.tipo === 'pago_tarjeta' || t.tipo === 'pago_prestamo') {
+            deltaDeudaPosteriorAlMes -= montoConv;
           }
         }
       });
 
-      const patrimonioNeto = liquidoAcumulado - (deudasTarjetasAcumuladas + deudasPrestamosAcumuladas);
+      const deudasEnEseMes = Math.max(0, deudaActualTarjetas + deudaActualPrestamos - deltaDeudaPosteriorAlMes);
+      const patrimonioNeto = liquidoAcumulado - deudasEnEseMes;
 
       return {
         mes: mInfo.label,
         Patrimonio: Math.round((patrimonioNeto || 0) * 100) / 100
       };
     });
-  }, [transacciones, tarjetas, prestamos, moneda, tiposCambio]);
+  }, [transacciones, cuentasBancarias, tarjetas, prestamos, moneda, tiposCambio]);
 
-  // Vencimientos Próximos
+  // Tramos segmentados para colorear la línea según dirección (verde al subir, rojo al bajar, índigo si se mantiene)
+  const { datosPatrimonioSegmentados, segmentosPatrimonio } = useMemo(() => {
+    const puntos = historialPatrimonioNeto || [];
+    if (puntos.length === 0) {
+      return { datosPatrimonioSegmentados: [], segmentosPatrimonio: [] };
+    }
+
+    const segmentos = [];
+    for (let i = 0; i < puntos.length - 1; i++) {
+      const valActual = puntos[i].Patrimonio;
+      const valSiguiente = puntos[i + 1].Patrimonio;
+      const diff = valSiguiente - valActual;
+      const tendencia = diff > 0.005 ? 'sube' : diff < -0.005 ? 'baja' : 'igual';
+      const color = tendencia === 'sube' ? '#10B981' : tendencia === 'baja' ? '#EF4444' : '#6366F1';
+      segmentos.push({
+        key: `seg_${i}`,
+        color,
+        tendencia
+      });
+    }
+
+    const datos = puntos.map((p, idx) => {
+      const fila = { ...p };
+      const prevVal = idx > 0 ? puntos[idx - 1].Patrimonio : p.Patrimonio;
+      const diffConAnterior = p.Patrimonio - prevVal;
+      fila._variacion = diffConAnterior;
+      fila._colorPunto = diffConAnterior > 0.005 ? '#10B981' : diffConAnterior < -0.005 ? '#EF4444' : '#6366F1';
+
+      segmentos.forEach((seg, sIdx) => {
+        fila[seg.key] = (idx === sIdx || idx === sIdx + 1) ? p.Patrimonio : null;
+      });
+      return fila;
+    });
+
+    return { datosPatrimonioSegmentados: datos, segmentosPatrimonio: segmentos };
+  }, [historialPatrimonioNeto]);
+
+  // Próximos vencimientos de tarjetas y préstamos (ventana -7 a +7 días)
   const proximosVencimientos = useMemo(() => {
-    const list = [];
     const hoy = new Date();
-    const hoyTimestamp = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate()).getTime();
+    const anioHoy = hoy.getFullYear();
+    const mesHoy = hoy.getMonth();
+    const diaHoy = hoy.getDate();
+    const fechaBaseHoy = new Date(anioHoy, mesHoy, diaHoy);
 
-    const calcularDiasRestantes = (diaVenc) => {
-      const anioActual = hoy.getFullYear();
-      const mesActual = hoy.getMonth();
-      
-      const numDiasEnMes = new Date(anioActual, mesActual + 1, 0).getDate();
-      const diaAjustado = Math.min(diaVenc, numDiasEnMes);
-      let fechaVenc = new Date(anioActual, mesActual, diaAjustado);
+    const calcularDiasRestantes = (diaVencimiento) => {
+      const diasMesActual = new Date(anioHoy, mesHoy + 1, 0).getDate();
+      const diaRealMesActual = Math.min(diaVencimiento, diasMesActual);
+      const fechaEsteMes = new Date(anioHoy, mesHoy, diaRealMesActual);
+      const diffEsteMes = Math.round((fechaEsteMes - fechaBaseHoy) / (1000 * 60 * 60 * 24));
 
-      let diffTiempo = fechaVenc.getTime() - hoyTimestamp;
-      let diffDias = Math.round(diffTiempo / (1000 * 3600 * 24));
-
-      if (diffDias < -7) {
-        const sigMes = mesActual + 1;
-        const numDiasSigMes = new Date(anioActual, sigMes + 1, 0).getDate();
-        const diaSigAjustado = Math.min(diaVenc, numDiasSigMes);
-        fechaVenc = new Date(anioActual, sigMes, diaSigAjustado);
-        diffTiempo = fechaVenc.getTime() - hoyTimestamp;
-        diffDias = Math.round(diffTiempo / (1000 * 3600 * 24));
+      if (diffEsteMes >= -7) {
+        return { diffDias: diffEsteMes, diaReal: diaRealMesActual };
       }
 
-      return { diffDias, diaReal: diaAjustado };
+      const mesSiguiente = mesHoy === 11 ? 0 : mesHoy + 1;
+      const anioSiguiente = mesHoy === 11 ? anioHoy + 1 : anioHoy;
+      const diasMesSiguiente = new Date(anioSiguiente, mesSiguiente + 1, 0).getDate();
+      const diaRealMesSiguiente = Math.min(diaVencimiento, diasMesSiguiente);
+      const fechaSigMes = new Date(anioSiguiente, mesSiguiente, diaRealMesSiguiente);
+      const diffSigMes = Math.round((fechaSigMes - fechaBaseHoy) / (1000 * 60 * 60 * 24));
+      return { diffDias: diffSigMes, diaReal: diaRealMesSiguiente };
     };
+
+    const list = [];
 
     tarjetas.forEach(t => {
       if (t.diaVencimiento && (t.deudaActual || 0) > 0) {
         const dVenc = Number(t.diaVencimiento);
         const { diffDias, diaReal } = calcularDiasRestantes(dVenc);
-        
+
         if (diffDias >= -7 && diffDias <= 7) {
           list.push({
             id: `tarj_${t.id}`,
@@ -3852,28 +3911,87 @@ function FinanzasDashboard() {
 
               <div className="h-64 w-full pt-2">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={historialPatrimonioNeto} margin={{ top: 10, right: 20, left: -10, bottom: 0 }}>
+                  <LineChart data={datosPatrimonioSegmentados} margin={{ top: 10, right: 20, left: -10, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke={darkMode ? '#334155' : '#E2E8F0'} />
                     <XAxis dataKey="mes" stroke={darkMode ? '#94A3B8' : '#64748B'} fontSize={11} tickLine={false} />
                     <YAxis stroke={darkMode ? '#94A3B8' : '#64748B'} fontSize={11} tickLine={false} />
                     <Tooltip 
-                      formatter={(val) => String(formatoMoneda(val, moneda))}
-                      labelFormatter={(label) => String(label)}
-                      contentStyle={{ 
-                        backgroundColor: darkMode ? '#0F172A' : '#FFFFFF', 
-                        borderColor: darkMode ? '#334155' : '#CBD5E1', 
-                        borderRadius: '12px',
-                        color: darkMode ? '#F8FAFC' : '#0F172A',
-                        fontSize: '12px'
+                      content={({ active, payload, label }) => {
+                        if (!active || !payload || !payload.length) return null;
+                        const punto = payload[0]?.payload;
+                        if (!punto) return null;
+                        const variacion = punto._variacion || 0;
+                        const colorTexto = variacion > 0.005 ? '#10B981' : variacion < -0.005 ? '#EF4444' : '#6366F1';
+                        return (
+                          <div
+                            style={{
+                              backgroundColor: darkMode ? '#0F172A' : '#FFFFFF',
+                              borderColor: darkMode ? '#334155' : '#CBD5E1',
+                              color: darkMode ? '#F8FAFC' : '#0F172A'
+                            }}
+                            className="px-3 py-2 rounded-xl border shadow-lg text-xs space-y-1"
+                          >
+                            <div className="font-bold">{label}</div>
+                            <div style={{ color: colorTexto }} className="font-semibold">
+                              Patrimonio: {formatoMoneda(punto.Patrimonio, moneda)}
+                            </div>
+                            {Math.abs(variacion) > 0.005 && (
+                              <div style={{ color: colorTexto }} className="text-[11px] font-medium">
+                                {variacion > 0 ? '▲ Subió: +' : '▼ Bajó: '}{formatoMoneda(variacion, moneda)}
+                              </div>
+                            )}
+                          </div>
+                        );
                       }}
                     />
-                    <Line 
-                      type="monotone" 
-                      dataKey="Patrimonio" 
-                      stroke="#6366F1" 
-                      strokeWidth={3} 
-                      dot={{ fill: '#6366F1', r: 4 }}
-                      activeDot={{ r: 6, fill: '#4F46E5' }} 
+                    {segmentosPatrimonio.map((seg) => (
+                      <Line
+                        key={seg.key}
+                        type="monotone"
+                        dataKey={seg.key}
+                        stroke={seg.color}
+                        strokeWidth={3}
+                        dot={false}
+                        activeDot={false}
+                        connectNulls={false}
+                        isAnimationActive={false}
+                      />
+                    ))}
+                    <Line
+                      type="monotone"
+                      dataKey="Patrimonio"
+                      stroke="transparent"
+                      strokeWidth={0}
+                      isAnimationActive={false}
+                      dot={(props) => {
+                        const { cx, cy, payload } = props;
+                        if (cx == null || cy == null || !payload) return null;
+                        return (
+                          <circle
+                            key={`dot_${payload.mes}`}
+                            cx={cx}
+                            cy={cy}
+                            r={4.5}
+                            fill={payload._colorPunto || '#6366F1'}
+                            stroke={darkMode ? '#0F172A' : '#FFFFFF'}
+                            strokeWidth={1.5}
+                          />
+                        );
+                      }}
+                      activeDot={(props) => {
+                        const { cx, cy, payload } = props;
+                        if (cx == null || cy == null || !payload) return null;
+                        return (
+                          <circle
+                            cx={cx}
+                            cy={cy}
+                            r={6.5}
+                            fill={payload._colorPunto || '#6366F1'}
+                            stroke="#FFFFFF"
+                            strokeWidth={2}
+                          />
+                        );
+                      }}
                     />
                   </LineChart>
                 </ResponsiveContainer>
