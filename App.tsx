@@ -1229,9 +1229,67 @@ function FinanzasDashboard() {
     tarjetas.forEach(t => {
       if (t.diaVencimiento && (t.deudaActual || 0) > 0) {
         const dVenc = Number(t.diaVencimiento);
-        const { diffDias, diaReal } = calcularDiasRestantes(dVenc);
+        const dCorte = t.diaCorte ? Number(t.diaCorte) : null;
 
-        if (diffDias >= -7 && diffDias <= 7) {
+        // Si la tarjeta tiene día de corte configurado, calcular cuánto de la deuda ya cerró ciclo
+        // (las compras posteriores al último cierre pertenecen al siguiente ciclo de facturación)
+        let deudaExigibleCiclo = Number(t.deudaActual || 0);
+        let fechaVencimientoReal = null;
+
+        if (dCorte && dCorte >= 1 && dCorte <= 31) {
+          // Determinar la fecha de corte correspondiente al ciclo que vence el día dVenc de este mes
+          // Caso típico: Corte día 25 -> Vence día 12 del mes siguiente (dVenc <= dCorte)
+          // Caso mismo mes: Corte día 5 -> Vence día 20 del mismo mes (dVenc > dCorte)
+          const mesCorteEsteCiclo = dVenc <= dCorte ? mesHoy - 1 : mesHoy;
+          const anioCorteEsteCiclo = mesCorteEsteCiclo < 0 ? anioHoy - 1 : anioHoy;
+          const mesCorteNorm = (mesCorteEsteCiclo + 12) % 12;
+          const diasEnMesCorte = new Date(anioCorteEsteCiclo, mesCorteNorm + 1, 0).getDate();
+          const fechaCorteEsteCiclo = new Date(anioCorteEsteCiclo, mesCorteNorm, Math.min(dCorte, diasEnMesCorte));
+
+          // Calcular cuánto se ha consumido DESPUÉS de ese cierre (deuda no facturada aún para este vencimiento)
+          let consumosPostCierre = 0;
+          transacciones.forEach(tr => {
+            if (tr.tipo === 'gasto' && tr.esCredito && (tr.tarjetaId === t.id || tr.metodo === t.nombre)) {
+              const [yT, mT, dT] = (tr.fecha || '').split('-').map(Number);
+              if (!isNaN(yT) && !isNaN(mT) && !isNaN(dT)) {
+                const fechaTrans = new Date(yT, mT - 1, dT);
+                if (fechaTrans > fechaCorteEsteCiclo) {
+                  consumosPostCierre += convertirMoneda(tr.monto, tr.moneda || 'PEN', t.moneda || 'PEN');
+                }
+              }
+            }
+          });
+
+          const deudaYaFacturada = Math.max(0, Number(t.deudaActual || 0) - consumosPostCierre);
+
+          if (deudaYaFacturada > 0.01) {
+            // Hay deuda de un estado de cuenta cerrado cuya fecha de pago es dVenc de este mes
+            deudaExigibleCiclo = deudaYaFacturada;
+            const diasMesActual = new Date(anioHoy, mesHoy + 1, 0).getDate();
+            fechaVencimientoReal = new Date(anioHoy, mesHoy, Math.min(dVenc, diasMesActual));
+          } else {
+            // Toda la deuda actual corresponde a compras posteriores al último cierre:
+            // vencerán en el siguiente ciclo de pago (mes siguiente o subsiguiente)
+            deudaExigibleCiclo = Number(t.deudaActual || 0);
+            const ultimoCortePasado = diaHoy > dCorte
+              ? new Date(anioHoy, mesHoy, Math.min(dCorte, new Date(anioHoy, mesHoy + 1, 0).getDate()))
+              : fechaCorteEsteCiclo;
+            const mesesASumar = dVenc <= dCorte ? 1 : 0;
+            const targetYear = ultimoCortePasado.getFullYear() + Math.floor((ultimoCortePasado.getMonth() + mesesASumar) / 12);
+            const targetMonth = (ultimoCortePasado.getMonth() + mesesASumar) % 12;
+            const diasTargetMonth = new Date(targetYear, targetMonth + 1, 0).getDate();
+            fechaVencimientoReal = new Date(targetYear, targetMonth, Math.min(dVenc, diasTargetMonth));
+          }
+        }
+
+        const diffDias = fechaVencimientoReal
+          ? Math.round((fechaVencimientoReal - fechaBaseHoy) / (1000 * 60 * 60 * 24))
+          : calcularDiasRestantes(dVenc).diffDias;
+        const diaReal = fechaVencimientoReal
+          ? fechaVencimientoReal.getDate()
+          : calcularDiasRestantes(dVenc).diaReal;
+
+        if (diffDias >= -7 && diffDias <= 7 && deudaExigibleCiclo > 0.01) {
           list.push({
             id: `tarj_${t.id}`,
             tipo: 'Tarjeta',
@@ -1239,7 +1297,7 @@ function FinanzasDashboard() {
             diaPago: diaReal,
             dias: diffDias,
             vencido: diffDias < 0,
-            montoTexto: formatoMoneda(t.deudaActual || 0, t.moneda || 'PEN')
+            montoTexto: formatoMoneda(deudaExigibleCiclo, t.moneda || 'PEN')
           });
         }
       }
@@ -1265,7 +1323,7 @@ function FinanzasDashboard() {
     });
 
     return list.sort((a, b) => a.dias - b.dias);
-  }, [tarjetas, prestamos, moneda, tiposCambio]);
+  }, [tarjetas, prestamos, transacciones, moneda, tiposCambio]);
 
   // Gastos por categoría para presupuestos del mes
   const gastosMesPorCategoria = useMemo(() => {
