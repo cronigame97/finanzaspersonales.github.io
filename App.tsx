@@ -685,7 +685,7 @@ function FinanzasDashboard() {
   const [tarjetaCuotaId, setTarjetaCuotaId] = useState('');
   const [conceptoCuotaForm, setConceptoCuotaForm] = useState('');
   const [montoTotalCuotaForm, setMontoTotalCuotaForm] = useState('');
-  const [numCuotasForm, setNumCuotasForm] = useState('3');
+  const [numCuotasForm, setNumCuotasForm] = useState('1');
   const [cuotaActualForm, setCuotaActualForm] = useState('1');
   const [categoriaCuotaForm, setCategoriaCuotaForm] = useState('Compras');
   const [fechaCuotaForm, setFechaCuotaForm] = useState(getFechaLocalHoy());
@@ -4180,7 +4180,7 @@ function FinanzasDashboard() {
                         setTarjetaCuotaId(tarjetas[0].id);
                         setConceptoCuotaForm('');
                         setMontoTotalCuotaForm('');
-                        setNumCuotasForm('3');
+                        setNumCuotasForm('1');
                         setCuotaActualForm('1');
                         setCategoriaCuotaForm(catGastosPers.includes('Compras') ? 'Compras' : (catGastosPers[0] || 'Compras'));
                         setFechaCuotaForm(getFechaLocalHoy());
@@ -6146,7 +6146,7 @@ function FinanzasDashboard() {
                   <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Número Total de Cuotas</label>
                   <input
                     type="number"
-                    min="2"
+                    min="1"
                     max="48"
                     required
                     value={numCuotasForm}
