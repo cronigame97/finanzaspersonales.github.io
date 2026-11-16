@@ -692,6 +692,7 @@ function FinanzasDashboard() {
 
   const [mostrarModalPagoTarjeta, setMostrarModalPagoTarjeta] = useState(false);
   const [tarjetaAPagarId, setTarjetaAPagarId] = useState('');
+  const [origenPagoTarjetaTipo, setOrigenPagoTarjetaTipo] = useState('cuenta'); // 'cuenta' | 'cashback'
   const [cuentaOrigenPagoTarjetaId, setCuentaOrigenPagoTarjetaId] = useState('');
   const [montoPagoTarjetaForm, setMontoPagoTarjetaForm] = useState('');
 
@@ -2057,29 +2058,36 @@ function FinanzasDashboard() {
   const registrarPagoTarjeta = (e) => {
     e.preventDefault();
     const monto = parseFloat(montoPagoTarjetaForm);
-    if (!monto || monto <= 0 || !tarjetaAPagarId || !cuentaOrigenPagoTarjetaId) return;
+    const esConCashback = origenPagoTarjetaTipo === 'cashback';
+    if (!monto || monto <= 0 || !tarjetaAPagarId) return;
+    if (!esConCashback && !cuentaOrigenPagoTarjetaId) return;
 
     const tarj = tarjetas.find(t => t.id === tarjetaAPagarId);
-    const cta = cuentasConSaldosActuales.find(c => c.id === cuentaOrigenPagoTarjetaId);
-    if (!tarj || !cta) return;
+    const cta = esConCashback ? null : cuentasConSaldosActuales.find(c => c.id === cuentaOrigenPagoTarjetaId);
+    if (!tarj || (!esConCashback && !cta)) return;
 
     const fecha = getFechaLocalHoy();
+    const monedaPago = esConCashback ? (tarj.moneda || 'PEN') : (cta.moneda || 'PEN');
     const pagoMov = {
       id: `pago_tarj_${Date.now()}`,
       tipo: 'pago_tarjeta',
       monto: monto,
-      descripcion: `Pago de Tarjeta: ${tarj.nombre}`,
+      descripcion: esConCashback
+        ? `Pago de Tarjeta con Cashback: ${tarj.nombre}`
+        : `Pago de Tarjeta: ${tarj.nombre}`,
+      nota: esConCashback ? 'Canje de cashback / recompensas aplicado a la deuda' : '',
       categoria: 'Pago de Tarjeta',
       fecha,
-      moneda: cta.moneda || 'PEN',
-      cuentaId: cta.id,
+      moneda: monedaPago,
+      cuentaId: esConCashback ? '__cashback__' : cta.id,
       tarjetaId: tarj.id,
-      metodo: cta.nombre
+      esCashback: esConCashback,
+      metodo: esConCashback ? 'Cashback / Puntos' : cta.nombre
     };
 
     setTransacciones(prev => [pagoMov, ...prev]);
 
-    const montoEnMonedaTarjeta = convertirMoneda(monto, cta.moneda || 'PEN', tarj.moneda || 'PEN');
+    const montoEnMonedaTarjeta = convertirMoneda(monto, monedaPago, tarj.moneda || 'PEN');
 
     setTarjetas(prev => prev.map(t => {
       if (t.id === tarj.id) {
@@ -2119,6 +2127,12 @@ function FinanzasDashboard() {
 
     setMostrarModalPagoTarjeta(false);
     setMontoPagoTarjetaForm('');
+    mostrarAviso(
+      esConCashback
+        ? `Pago con cashback aplicado a ${tarj.nombre}.`
+        : `Pago registrado en ${tarj.nombre}.`,
+      'ok'
+    );
   };
 
   // Préstamos Handlers
@@ -4348,6 +4362,7 @@ function FinanzasDashboard() {
                     <button
                       onClick={() => {
                         setTarjetaAPagarId(tarjetas[0].id);
+                        setOrigenPagoTarjetaTipo(cuentasBancarias.length > 0 ? 'cuenta' : 'cashback');
                         if (cuentasBancarias.length > 0) setCuentaOrigenPagoTarjetaId(cuentasBancarias[0].id);
                         setMostrarModalPagoTarjeta(true);
                       }}
@@ -6198,22 +6213,86 @@ function FinanzasDashboard() {
               </div>
 
               <div>
-                <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Cuenta Origen del Pago</label>
-                <select
-                  value={cuentaOrigenPagoTarjetaId}
-                  onChange={(e) => setCuentaOrigenPagoTarjetaId(e.target.value)}
-                  className={`w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
-                >
-                  {cuentasConSaldosActuales.map(c => (
-                    <option key={c.id} value={c.id} className="bg-slate-800 text-white">
-                      {c.nombre} (Saldo: {formatoMoneda(c.saldoActual, c.moneda)})
-                    </option>
-                  ))}
-                </select>
+                <label className={`block text-xs font-semibold mb-1.5 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Método de Pago</label>
+                <div className={`grid grid-cols-2 gap-1.5 p-1 rounded-xl ${darkMode ? 'bg-slate-800' : 'bg-slate-100'}`}>
+                  <button
+                    type="button"
+                    onClick={() => setOrigenPagoTarjetaTipo('cuenta')}
+                    className={`py-2 px-2.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                      origenPagoTarjetaTipo === 'cuenta'
+                        ? (darkMode ? 'bg-slate-700 text-purple-300 shadow' : 'bg-white text-purple-700 shadow')
+                        : 'text-slate-400'
+                    }`}
+                  >
+                    <Building2 className="w-3.5 h-3.5" /> Cuenta / Billetera
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setOrigenPagoTarjetaTipo('cashback')}
+                    className={`py-2 px-2.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                      origenPagoTarjetaTipo === 'cashback'
+                        ? (darkMode ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow' : 'bg-emerald-50 text-emerald-700 border border-emerald-200 shadow')
+                        : 'text-slate-400'
+                    }`}
+                  >
+                    <Sparkles className="w-3.5 h-3.5" /> Cashback / Puntos
+                  </button>
+                </div>
               </div>
 
+              {origenPagoTarjetaTipo === 'cuenta' ? (
+                <div>
+                  <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Cuenta Origen del Pago</label>
+                  {cuentasConSaldosActuales.length === 0 ? (
+                    <p className="text-xs text-amber-400 p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20">
+                      No tienes cuentas registradas. Puedes pagar usando <strong>Cashback / Puntos</strong> o crear una cuenta primero.
+                    </p>
+                  ) : (
+                    <select
+                      value={cuentaOrigenPagoTarjetaId}
+                      onChange={(e) => setCuentaOrigenPagoTarjetaId(e.target.value)}
+                      className={`w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-sm ${darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
+                    >
+                      {cuentasConSaldosActuales.map(c => (
+                        <option key={c.id} value={c.id} className="bg-slate-800 text-white">
+                          {c.nombre} (Saldo: {formatoMoneda(c.saldoActual, c.moneda)})
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+              ) : (
+                <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-300 flex items-start gap-2">
+                  <Sparkles className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                  <span>
+                    El canje de <strong>Cashback / Puntos</strong> reducirá directamente la deuda de tu tarjeta (y tus cuotas pendientes) en <strong>{tarjetas.find(t => t.id === tarjetaAPagarId)?.moneda || 'PEN'}</strong> sin descontar dinero de tus cuentas o billeteras.
+                  </span>
+                </div>
+              )}
+
               <div>
-                <label className={`block text-xs font-semibold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Monto a Pagar</label>
+                <div className="flex justify-between items-center mb-1">
+                  <label className={`block text-xs font-semibold ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>
+                    Monto a Pagar ({origenPagoTarjetaTipo === 'cashback' ? (tarjetas.find(t => t.id === tarjetaAPagarId)?.moneda || 'PEN') : (cuentasConSaldosActuales.find(c => c.id === cuentaOrigenPagoTarjetaId)?.moneda || 'PEN')})
+                  </label>
+                  {(() => {
+                    const tarjSel = tarjetas.find(t => t.id === tarjetaAPagarId);
+                    if (!tarjSel || (tarjSel.deudaActual || 0) <= 0) return null;
+                    const monDestino = origenPagoTarjetaTipo === 'cashback'
+                      ? (tarjSel.moneda || 'PEN')
+                      : (cuentasConSaldosActuales.find(c => c.id === cuentaOrigenPagoTarjetaId)?.moneda || tarjSel.moneda || 'PEN');
+                    const deudaEnMonedaPago = convertirMoneda(tarjSel.deudaActual, tarjSel.moneda || 'PEN', monDestino);
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => setMontoPagoTarjetaForm(String(Math.round(deudaEnMonedaPago * 100) / 100))}
+                        className="text-[11px] font-semibold text-purple-400 hover:text-purple-300 underline"
+                      >
+                        Pagar deuda total ({formatoMoneda(deudaEnMonedaPago, monDestino)})
+                      </button>
+                    );
+                  })()}
+                </div>
                 <input
                   type="number"
                   step="0.01"
@@ -6235,9 +6314,14 @@ function FinanzasDashboard() {
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 py-2.5 bg-purple-600 text-white rounded-xl font-semibold hover:bg-purple-700 text-sm shadow-sm"
+                  disabled={origenPagoTarjetaTipo === 'cuenta' && cuentasConSaldosActuales.length === 0}
+                  className={`flex-1 py-2.5 text-white rounded-xl font-semibold text-sm shadow-sm disabled:opacity-50 ${
+                    origenPagoTarjetaTipo === 'cashback'
+                      ? 'bg-emerald-600 hover:bg-emerald-700'
+                      : 'bg-purple-600 hover:bg-purple-700'
+                  }`}
                 >
-                  Confirmar Pago
+                  {origenPagoTarjetaTipo === 'cashback' ? 'Aplicar Cashback' : 'Confirmar Pago'}
                 </button>
               </div>
             </form>
