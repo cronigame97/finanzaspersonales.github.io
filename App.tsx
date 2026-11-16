@@ -1246,7 +1246,7 @@ function FinanzasDashboard() {
           const diasEnMesCorte = new Date(anioCorteEsteCiclo, mesCorteNorm + 1, 0).getDate();
           const fechaCorteEsteCiclo = new Date(anioCorteEsteCiclo, mesCorteNorm, Math.min(dCorte, diasEnMesCorte));
 
-          // Calcular cuánto se ha consumido DESPUÉS de ese cierre (deuda no facturada aún para este vencimiento)
+          // Calcular cuánto se ha consumido DESPUÉS de ese cierre (deuda del ciclo abierto que aún no vence este mes)
           let consumosPostCierre = 0;
           transacciones.forEach(tr => {
             if (tr.tipo === 'gasto' && tr.esCredito && (tr.tarjetaId === t.id || tr.metodo === t.nombre)) {
@@ -1268,15 +1268,19 @@ function FinanzasDashboard() {
             const diasMesActual = new Date(anioHoy, mesHoy + 1, 0).getDate();
             fechaVencimientoReal = new Date(anioHoy, mesHoy, Math.min(dVenc, diasMesActual));
           } else {
-            // Toda la deuda actual corresponde a compras posteriores al último cierre:
-            // vencerán en el siguiente ciclo de pago (mes siguiente o subsiguiente)
+            // Toda la deuda actual corresponde a compras posteriores al último cierre (ej: 6 nov > corte 25 oct):
+            // esas compras cierran en el PRÓXIMO corte (25 nov) y vencen en el mes siguiente (12 dic)
             deudaExigibleCiclo = Number(t.deudaActual || 0);
-            const ultimoCortePasado = diaHoy > dCorte
+            const proximoCorte = diaHoy <= dCorte
               ? new Date(anioHoy, mesHoy, Math.min(dCorte, new Date(anioHoy, mesHoy + 1, 0).getDate()))
-              : fechaCorteEsteCiclo;
-            const mesesASumar = dVenc <= dCorte ? 1 : 0;
-            const targetYear = ultimoCortePasado.getFullYear() + Math.floor((ultimoCortePasado.getMonth() + mesesASumar) / 12);
-            const targetMonth = (ultimoCortePasado.getMonth() + mesesASumar) % 12;
+              : new Date(
+                  mesHoy === 11 ? anioHoy + 1 : anioHoy,
+                  (mesHoy + 1) % 12,
+                  Math.min(dCorte, new Date(mesHoy === 11 ? anioHoy + 1 : anioHoy, ((mesHoy + 1) % 12) + 1, 0).getDate())
+                );
+            const mesesDespuesDeCorte = dVenc <= dCorte ? 1 : 0;
+            const targetYear = proximoCorte.getFullYear() + Math.floor((proximoCorte.getMonth() + mesesDespuesDeCorte) / 12);
+            const targetMonth = (proximoCorte.getMonth() + mesesDespuesDeCorte) % 12;
             const diasTargetMonth = new Date(targetYear, targetMonth + 1, 0).getDate();
             fechaVencimientoReal = new Date(targetYear, targetMonth, Math.min(dVenc, diasTargetMonth));
           }
